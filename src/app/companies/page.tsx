@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useDeferredValue, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -66,8 +66,9 @@ export default function CompaniesPage() {
   const [isResultOpen, setIsResultOpen] = useState(false);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [selectedCompanies, setSelectedCompanies] = useState<number[]>([]);
+  const [selectedCompanies, setSelectedCompanies] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -76,6 +77,7 @@ export default function CompaniesPage() {
   const [excelData, setExcelData] = useState<ExcelCompany[]>([]);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importProgress, setImportProgress] = useState(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     companyCode: '',
@@ -112,19 +114,32 @@ export default function CompaniesPage() {
     },
   ]);
 
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+    }, 350);
+
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
   const fetchCompanies = useCallback(async () => {
     try {
       setIsLoading(true);
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       const params = new URLSearchParams();
       params.append('limit', pageSize.toString());
       params.append('offset', ((page - 1) * pageSize).toString());
-      if (searchQuery.trim()) {
-        params.append('search', searchQuery.trim());
+      if (debouncedSearch) {
+        params.append('search', debouncedSearch);
       }
 
-      const response = await fetch(`/api/companies?${params.toString()}`);
-      
+      const response = await fetch(`/api/companies?${params.toString()}`, {
+        signal: controller.signal,
+      });
+
       if (!response.ok) {
         throw new Error('Firmalar yüklenemedi');
       }
@@ -132,12 +147,15 @@ export default function CompaniesPage() {
       const data = await response.json();
       setCompanies(data);
     } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        return;
+      }
       console.error('Error fetching companies:', error);
       toast.error('Firmalar yüklenirken hata oluştu');
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, searchQuery]);
+  }, [page, pageSize, debouncedSearch]);
 
   useEffect(() => {
     fetchCompanies();
@@ -146,11 +164,15 @@ export default function CompaniesPage() {
   // Reset page when search changes
   useEffect(() => {
     setPage(1);
-  }, [searchQuery]);
+  }, [debouncedSearch]);
+
+  useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  const deferredCompanies = useDeferredValue(companies);
 
   // Sort companies (filtering handled mostly server-side via search)
   const filteredAndSortedCompanies = useMemo(() => {
-    const sorted = [...companies];
+    const sorted = [...deferredCompanies];
 
     sorted.sort((a, b) => {
       switch (sortBy) {
@@ -168,31 +190,31 @@ export default function CompaniesPage() {
     });
 
     return sorted;
-  }, [companies, sortBy]);
+  }, [deferredCompanies, sortBy]);
 
   // Statistics
   const stats = useMemo(() => {
     const now = new Date();
-    const thisMonth = companies.filter((c) => {
+    const thisMonth = deferredCompanies.filter((c) => {
       const created = new Date(c.createdAt);
       return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
     }).length;
 
-    const thisWeek = companies.filter((c) => {
+    const thisWeek = deferredCompanies.filter((c) => {
       const created = new Date(c.createdAt);
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       return created >= weekAgo;
     }).length;
 
-    const withNotes = companies.filter(c => c.notes && c.notes.trim().length > 0).length;
+    const withNotes = deferredCompanies.filter(c => c.notes && c.notes.trim().length > 0).length;
 
     return {
-      total: companies.length,
+      total: deferredCompanies.length,
       thisMonth,
       thisWeek,
       withNotes,
     };
-  }, [companies]);
+  }, [deferredCompanies]);
 
   // Email validation
   const validateEmail = (email: string): boolean => {
@@ -314,10 +336,13 @@ export default function CompaniesPage() {
   }, [selectedCompany, companies]);
 
   const handleBulkDelete = useCallback(async () => {
+    if (selectedCompanies.size === 0) return;
     setIsSubmitting(true);
 
     try {
-      const deletePromises = selectedCompanies.map(id =>
+      const ids = Array.from(selectedCompanies);
+      const idsSet = new Set(selectedCompanies);
+      const deletePromises = ids.map((id) =>
         fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
       );
 
@@ -327,11 +352,11 @@ export default function CompaniesPage() {
       if (failedCount > 0) {
         toast.error(`${failedCount} firma silinemedi`);
       } else {
-        toast.success(`${selectedCompanies.length} firma başarıyla silindi`);
+        toast.success(`${ids.length} firma başarıyla silindi`);
       }
 
-      setCompanies(companies.filter(c => !selectedCompanies.includes(c.id)));
-      setSelectedCompanies([]);
+      setCompanies(companies.filter(c => !idsSet.has(c.id)));
+      setSelectedCompanies(new Set());
       setIsBulkDeleteOpen(false);
     } catch (error) {
       console.error('Error bulk deleting companies:', error);
@@ -379,18 +404,25 @@ export default function CompaniesPage() {
   }, []);
 
   const toggleCompanySelection = useCallback((id: number) => {
-    setSelectedCompanies(prev =>
-      prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]
-    );
+    setSelectedCompanies((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   const toggleSelectAll = useCallback(() => {
-    if (selectedCompanies.length === filteredAndSortedCompanies.length) {
-      setSelectedCompanies([]);
-    } else {
-      setSelectedCompanies(filteredAndSortedCompanies.map(c => c.id));
-    }
-  }, [selectedCompanies, filteredAndSortedCompanies]);
+    setSelectedCompanies((prev) => {
+      if (prev.size === filteredAndSortedCompanies.length) {
+        return new Set();
+      }
+      return new Set(filteredAndSortedCompanies.map((c) => c.id));
+    });
+  }, [filteredAndSortedCompanies]);
 
   const toggleSortDirection = useCallback(() => {
     setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -1057,17 +1089,17 @@ export default function CompaniesPage() {
       </div>
 
       {/* Bulk Actions Bar */}
-      {selectedCompanies.length > 0 && (
+      {selectedCompanies.size > 0 && (
         <Card className="border border-primary/40 bg-primary/5 shadow-[0_1px_0_rgba(0,0,0,0.04)]">
           <CardContent className="py-2 md:py-3 px-3 md:px-6">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 md:gap-3">
                 <Checkbox
-                  checked={selectedCompanies.length === filteredAndSortedCompanies.length}
+                  checked={selectedCompanies.size === filteredAndSortedCompanies.length}
                   onCheckedChange={toggleSelectAll}
                 />
                 <span className="text-xs md:text-sm font-medium">
-                  {selectedCompanies.length} firma seçildi
+                  {selectedCompanies.size} firma seçildi
                 </span>
               </div>
               <div className="flex items-center gap-1 md:gap-2">
@@ -1083,7 +1115,7 @@ export default function CompaniesPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSelectedCompanies([])}
+                  onClick={() => setSelectedCompanies(new Set())}
                 >
                   İptal
                 </Button>
@@ -1283,10 +1315,10 @@ export default function CompaniesPage() {
         <div className="grid gap-3 md:gap-4 lg:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {filteredAndSortedCompanies.map((company) => (
             <Card key={company.id} className="border border-border/60 hover:border-primary/50 shadow-[0_1px_0_rgba(0,0,0,0.04)] hover:shadow-lg transition-all h-full relative group">
-              {selectedCompanies.length > 0 && (
+              {selectedCompanies.size > 0 && (
                 <div className="absolute top-3 left-3 z-10">
                   <Checkbox
-                    checked={selectedCompanies.includes(company.id)}
+                    checked={selectedCompanies.has(company.id)}
                     onCheckedChange={() => toggleCompanySelection(company.id)}
                   />
                 </div>
@@ -1390,9 +1422,9 @@ export default function CompaniesPage() {
               <CardContent className="p-3 md:p-4">
                 <div className="flex items-center justify-between gap-3 md:gap-4">
                   <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
-                    {selectedCompanies.length > 0 && (
+                    {selectedCompanies.size > 0 && (
                       <Checkbox
-                        checked={selectedCompanies.includes(company.id)}
+                        checked={selectedCompanies.has(company.id)}
                         onCheckedChange={() => toggleCompanySelection(company.id)}
                       />
                     )}
@@ -1654,7 +1686,7 @@ export default function CompaniesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Toplu Sil</AlertDialogTitle>
             <AlertDialogDescription>
-              Seçili <strong>{selectedCompanies.length} firmayı</strong> silmek istediğinizden emin misiniz?
+              Seçili <strong>{selectedCompanies.size} firmayı</strong> silmek istediğinizden emin misiniz?
               Bu işlem geri alınamaz.
             </AlertDialogDescription>
           </AlertDialogHeader>

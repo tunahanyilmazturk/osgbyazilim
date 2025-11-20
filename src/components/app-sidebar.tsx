@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Home, Building2, Calendar, Stethoscope, Plus, TestTube, FileText, BarChart3, User, FolderOpen, CalendarDays, Bell, UserCog, ChevronDown, CalendarPlus } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -18,11 +19,24 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/auth-context";
+import type { AuthenticatedUser } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/components/ui/sidebar";
 
-const menuGroups = [
+type MenuItem = {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  allowedRoles?: Array<AuthenticatedUser["role"]>;
+};
+
+type MenuGroup = {
+  label: string;
+  items: MenuItem[];
+};
+
+const menuGroups: MenuGroup[] = [
   {
     label: "Genel",
     items: [
@@ -50,11 +64,13 @@ const menuGroups = [
         title: "Sağlık Testleri",
         url: "/health-tests",
         icon: TestTube,
+        allowedRoles: ["admin", "manager"],
       },
       {
         title: "Kullanıcı Yönetimi",
         url: "/users",
         icon: UserCog,
+        allowedRoles: ["admin", "manager"],
       },
     ],
   },
@@ -75,6 +91,7 @@ const menuGroups = [
         title: "Randevu Oluştur",
         url: "/screenings/new",
         icon: Plus,
+        allowedRoles: ["admin", "manager"],
       },
     ],
   },
@@ -85,6 +102,7 @@ const menuGroups = [
         title: "Döküman Yönetimi",
         url: "/documents",
         icon: FolderOpen,
+        allowedRoles: ["admin", "manager"],
       },
     ],
   },
@@ -95,6 +113,7 @@ const menuGroups = [
         title: "Teklif Yönetimi",
         url: "/quotes",
         icon: FileText,
+        allowedRoles: ["admin", "manager"],
       },
     ],
   },
@@ -105,6 +124,7 @@ const menuGroups = [
         title: "Raporlama",
         url: "/reports",
         icon: BarChart3,
+        allowedRoles: ["admin", "manager"],
       },
     ],
   },
@@ -221,7 +241,24 @@ export function AppSidebar() {
     return 0;
   };
 
-  const filteredMenuGroups = useMemo(() => menuGroups, []);
+  const userRole = currentUser?.role;
+
+  const filteredMenuGroups = useMemo(() => {
+    return menuGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => {
+          if (!item.allowedRoles || item.allowedRoles.length === 0) {
+            return true;
+          }
+          if (!userRole) {
+            return false;
+          }
+          return item.allowedRoles.includes(userRole);
+        }),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [userRole]);
 
   const groupBadges = useMemo(() => ({
     Genel: sidebarMetrics.unreadNotifications > 0 ? `${sidebarMetrics.unreadNotifications} yeni` : null,
@@ -235,7 +272,7 @@ export function AppSidebar() {
   }, [isMobile, setOpenMobile]);
 
   return (
-    <Sidebar collapsible="icon" className="border-r bg-sidebar">
+    <Sidebar collapsible="icon" className="border-r bg-sidebar supports-backdrop-filter:backdrop-blur-xl">
       <SidebarHeader className="border-b px-3 py-3 gap-3">
         <div className="flex items-center gap-2.5 rounded-xl border bg-sidebar px-3 py-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-full border bg-background">
