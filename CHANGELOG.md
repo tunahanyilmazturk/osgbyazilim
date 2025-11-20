@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-11-20
+
+### Added
+- Takvim sayfası (`/calendar`) için tam ekran, panelli yeni düzen.
+  - Özel toolbar, aktif filtre rozetleri ve istatistik yan paneli ile birlikte çalışıyor.
+- Sağlık Taramaları (`/screenings`) sayfasına kompakt hero, hızlı durum filtreleri ve yüzen toplu aksiyon barı eklendi.
+
+### Changed
+- `/calendar` ve `/screenings` rotalarında sidebar varsayılan olarak ikon modunda açılıyor, header gizleniyor.
+- Firmalar (`/companies`) sayfasında liste etkileşimleri performans için iyileştirildi.
+  - Seçimler `Set` tabanına taşındı, arama girişine debounce ve `AbortController` ile iptal desteği eklendi.
+- Recharts tabanlı grafik bileşenlerinde tooltip/legend tipleri rafine edilerek tema uyumlu hale getirildi.
+
+### Fixed
+- Takvim ve tarama sayfalarındaki JSX bloklarında kalan sözdizimi hataları düzeltildi.
+- `src/components/ui/chart.tsx` dosyasındaki `payload`, `label`, `color` ve `map` ilişkili TypeScript lint hataları giderildi.
+
 ## [0.1.0] - 2025-11-14
 
 ### Added
