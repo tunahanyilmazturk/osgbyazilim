@@ -43,7 +43,6 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  DragEndEvent,
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -106,6 +105,8 @@ const CURRENCY_RATES: Record<Currency, number> = {
   USD: 34.50,
   EUR: 37.80,
 };
+
+type QuoteDragEndEvent = Parameters<NonNullable<React.ComponentProps<typeof DndContext>["onDragEnd"]>>[0];
 
 const NOTE_TEMPLATES = [
   'Teklif fiyatlarımız KDV hariçtir.',
@@ -955,7 +956,7 @@ export default function NewQuotePage() {
     toast.success(`${selected.length} kalemin KDV oranı güncellendi`);
   }, [items]);
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: QuoteDragEndEvent) => {
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
@@ -2593,7 +2594,7 @@ export default function NewQuotePage() {
                         >
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1">
-                              {isFavorite && <Star className="w-3 h-3 fill-yellow-500 text-yellow-500 flex-shrink-0" />}
+                              {isFavorite && <Star className="w-3 h-3 fill-yellow-500 text-yellow-500 shrink-0" />}
                               <span className="font-medium truncate" title={test.name}>{test.name}</span>
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">

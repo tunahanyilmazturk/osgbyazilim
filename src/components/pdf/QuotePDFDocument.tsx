@@ -1,3 +1,4 @@
+/* eslint-disable jsx-a11y/alt-text */
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
 
 Font.register({

@@ -422,8 +422,8 @@ export default function NewScreeningPage() {
         }
       }
 
-      toast.success('🎉 Randevu başarıyla oluşturuldu!');
-      router.push('/screenings');
+      toast.success('🎉 Randevu başarıyla oluşturuldu! Detay sayfasına yönlendiriliyorsunuz.');
+      router.push(`/screenings/${screening.id}`);
     } catch (error) {
       console.error('Error creating screening:', error);
       toast.error(error instanceof Error ? error.message : 'Randevu oluşturulurken hata oluştu');

@@ -23,12 +23,6 @@
 # misc
 .DS_Store
 *.pem
-.env
-
-# environment templates
-.env.local
-.env.development
-.env.production
 
 # debug
 npm-debug.log*

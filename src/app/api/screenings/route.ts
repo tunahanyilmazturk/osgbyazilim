@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { screenings, notifications, companies, screeningUsers, users, screeningTests, healthTests } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
+import { sendScreeningNotificationEmail } from '@/lib/email/send-screening-notification';
 
 const VALID_TYPES = ['periodic', 'initial', 'special'];
 const VALID_STATUSES = ['scheduled', 'completed', 'cancelled', 'no-show'];
@@ -388,6 +389,40 @@ export async function POST(request: NextRequest) {
     } catch (notifError) {
       logger.error('Error creating notification', notifError);
       // Don't fail the screening creation if notification fails
+    }
+
+    // Send email to assigned personnel
+    try {
+      const recipients = Array.from(
+        new Set(
+          assignedUsers
+            .map((user) => user.email)
+            .filter((email): email is string => Boolean(email && email.includes('@')))
+        )
+      );
+
+      if (recipients.length === 0 && company[0].email) {
+        recipients.push(company[0].email);
+      }
+
+      if (recipients.length > 0) {
+        await sendScreeningNotificationEmail({
+          recipients,
+          companyName: company[0].name,
+          companyContact: company[0].contactPerson,
+          screening: {
+            id: newScreening[0].id,
+            date,
+            timeStart,
+            timeEnd,
+            type,
+            participantName: participantName.trim(),
+            notes: notes || null,
+          },
+        });
+      }
+    } catch (emailError) {
+      logger.error('Error sending screening notification email', emailError);
     }
 
     return NextResponse.json(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -62,6 +62,16 @@ type AssignedTest = {
   code: string | null;
 };
 
+type CompanyWorker = {
+  id: number;
+  fullName: string;
+  email: string | null;
+  phone: string;
+  jobTitle: string;
+  department: string | null;
+  isActive: boolean;
+};
+
 type Screening = {
   id: number;
   companyId: number;
@@ -76,6 +86,7 @@ type Screening = {
   createdAt: string;
   assignedUsers?: AssignedUser[];
   assignedTests?: AssignedTest[];
+  companyWorkers?: CompanyWorker[];
 };
 
 type Document = {
@@ -116,6 +127,10 @@ export default function ScreeningDetailPage() {
   const [deleteDocumentId, setDeleteDocumentId] = useState<number | null>(null);
   const [isDeletingDocument, setIsDeletingDocument] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   useEffect(() => {
     fetchScreeningDetails();
@@ -155,6 +170,70 @@ export default function ScreeningDetailPage() {
       toast.error('Randevu bilgileri yüklenirken hata oluştu');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const assignedEmails = screening?.assignedUsers?.filter((user) => Boolean(user.email)) || [];
+  const workerEmails = screening?.companyWorkers?.filter((worker) => Boolean(worker.email)) || [];
+  const combinedRecipients = [...assignedEmails, ...workerEmails];
+
+  const defaultEmailSubject = useMemo(() => {
+    if (!screening || !company) return 'Yeni Randevu Bilgisi';
+    const dateLabel = new Date(screening.date).toLocaleDateString('tr-TR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    return `${company.name} - ${dateLabel} Randevu Bilgisi`;
+  }, [screening, company]);
+
+  const defaultEmailMessage = useMemo(() => {
+    if (!screening || !company) return '';
+    const dateLabel = new Date(screening.date).toLocaleDateString('tr-TR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+
+    return `Merhaba,
+
+${company.name} firması için ${dateLabel} tarihinde ${screening.timeStart}-${screening.timeEnd} saatleri arasında planlanan sağlık taraması bulunmaktadır.
+
+Planlanan personel olarak hazırlıklarınızı tamamlayıp belirtilen saatte hazır bulunmanızı rica ederiz.
+
+Teşekkürler.`;
+  }, [screening, company]);
+
+  const handleSendEmail = async () => {
+    if (!screening) return;
+
+    try {
+      setIsSendingEmail(true);
+      const response = await fetch(`/api/screenings/${screening.id}/send-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          subject: (emailSubject || defaultEmailSubject).trim(),
+          message: (emailMessage || defaultEmailMessage).trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'E-posta gönderilemedi' }));
+        throw new Error(error.error || 'E-posta gönderilemedi');
+      }
+
+      toast.success('E-posta personele gönderildi');
+      setIsEmailDialogOpen(false);
+      setEmailSubject('');
+      setEmailMessage('');
+    } catch (error) {
+      console.error('Error sending email:', error);
+      toast.error(error instanceof Error ? error.message : 'E-posta gönderilirken hata oluştu');
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -515,6 +594,102 @@ export default function ScreeningDetailPage() {
             )}
             PDF İndir
           </Button>
+          <Dialog
+            open={isEmailDialogOpen}
+            onOpenChange={(open) => {
+              setIsEmailDialogOpen(open);
+              if (open) {
+                setEmailSubject((prev) => prev || defaultEmailSubject);
+                setEmailMessage((prev) => prev || defaultEmailMessage);
+              } else {
+                setEmailSubject('');
+                setEmailMessage('');
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button variant="default" className="gap-2">
+                <Mail className="w-4 h-4" />
+                Mail Gönder
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Personele E-posta Gönder</DialogTitle>
+                <DialogDescription>
+                  Bu randevuya atanmış personel ve firma iletişimlerine e-posta gönderilir.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="emailSubject">Konu</Label>
+                  <Input
+                    id="emailSubject"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    placeholder={defaultEmailSubject}
+                  />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-2">Alıcılar</p>
+                  {combinedRecipients.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-3 bg-muted/40">
+                      {assignedEmails.length > 0 && (
+                        <>
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Atanan Kullanıcılar</p>
+                          {assignedEmails.map((user) => (
+                            <div key={`user-${user.id}`} className="flex flex-col">
+                              <span className="font-medium text-sm">{user.fullName}</span>
+                              <span className="text-xs text-muted-foreground">{user.email}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {workerEmails.length > 0 && (
+                        <>
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Firma Personeli</p>
+                          {workerEmails.map((worker) => (
+                            <div key={`worker-${worker.id}`} className="flex flex-col">
+                              <span className="font-medium text-sm">{worker.fullName}</span>
+                              <span className="text-xs text-muted-foreground">{worker.email}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground border rounded-lg p-3">
+                      Bu firmaya ait e-posta bulunamadı. Lütfen firma veya personel kayıtlarını güncelleyin.
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="emailMessage">Mesaj</Label>
+                  <Textarea
+                    id="emailMessage"
+                    rows={6}
+                    value={emailMessage}
+                    onChange={(e) => setEmailMessage(e.target.value)}
+                    placeholder={defaultEmailMessage}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEmailDialogOpen(false)} disabled={isSendingEmail}>
+                  İptal
+                </Button>
+                <Button onClick={handleSendEmail} disabled={isSendingEmail}>
+                  {isSendingEmail ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Gönderiliyor...
+                    </>
+                  ) : (
+                    'E-postayı Gönder'
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Badge variant={statusBadge.variant} className="text-base px-4 py-2">
             {statusBadge.label}
           </Badge>
@@ -946,12 +1121,14 @@ export default function ScreeningDetailPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Randevuyu silmek istediğinize emin misiniz?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Bu işlem geri alınamaz. Randevu #{screening.id} kalıcı olarak silinecektir.
-              <div className="mt-4 p-3 bg-muted rounded-lg text-sm">
-                <p><strong>Firma:</strong> {company?.name}</p>
-                <p><strong>Katılımcı:</strong> {screening.participantName}</p>
-                <p><strong>Tarih:</strong> {screeningDate.toLocaleDateString('tr-TR')} - {screening.timeStart}</p>
+            <AlertDialogDescription asChild>
+              <div className="text-muted-foreground text-sm space-y-3">
+                <p>Bu işlem geri alınamaz. Randevu #{screening.id} kalıcı olarak silinecektir.</p>
+                <div className="p-3 bg-muted rounded-lg">
+                  <p><strong>Firma:</strong> {company?.name}</p>
+                  <p><strong>Katılımcı:</strong> {screening.participantName}</p>
+                  <p><strong>Tarih:</strong> {screeningDate.toLocaleDateString('tr-TR')} - {screening.timeStart}</p>
+                </div>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

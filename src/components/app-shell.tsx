@@ -17,6 +17,9 @@ export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const isLoginPage = pathname === "/login";
   const { status } = useAuth();
+  const isCalendarPage = pathname?.startsWith('/calendar');
+  const isScreeningsPage = pathname?.startsWith('/screenings');
+  const isImmersivePage = isCalendarPage || isScreeningsPage;
   const isCheckingAuth = status === "idle" || status === "loading";
 
   // If user is not authenticated, redirect to login for all routes except /login
@@ -42,13 +45,15 @@ export function AppShell({ children }: AppShellProps) {
     return <>{children}</>;
   }
 
+  const sidebarKey = isCalendarPage ? 'calendar' : isScreeningsPage ? 'screenings' : 'default';
+
   return (
     <ErrorBoundary>
       <div className="relative min-h-screen bg-background">
-        <SidebarProvider>
+        <SidebarProvider key={sidebarKey} defaultOpen={!isImmersivePage}>
           <AppSidebar />
           <SidebarInset>
-            <AppHeader />
+            {!isImmersivePage && <AppHeader />}
             <div className="relative z-10">
               {children}
             </div>

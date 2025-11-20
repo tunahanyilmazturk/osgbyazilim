@@ -34,7 +34,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Loader2, Edit, Trash2, FileText, Building2, Calendar, Check, X, Download } from 'lucide-react';
+import { ArrowLeft, Loader2, Edit, Trash2, FileText, Building2, Calendar, Check, X, Download, Mail } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { pdf } from '@react-pdf/renderer';
@@ -117,6 +117,9 @@ export default function QuoteDetailPage() {
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemQuantity, setNewItemQuantity] = useState('1');
   const [newItemUnitPrice, setNewItemUnitPrice] = useState('0');
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailData, setEmailData] = useState({ to: '', subject: '', message: '' });
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   const fetchQuote = useCallback(async () => {
     try {
@@ -141,6 +144,15 @@ export default function QuoteDetailPage() {
   useEffect(() => {
     fetchQuote();
   }, [fetchQuote]);
+
+  useEffect(() => {
+    if (!quote) return;
+    setEmailData({
+      to: quote.company.email || '',
+      subject: `${quote.quoteNumber} - Teklif`,
+      message: `Merhaba ${quote.company.contactPerson || ''},\n\n${quote.quoteNumber} numaralı teklifimizi ekte bilgilerinize sunarız. Sorularınız olursa bizimle iletişime geçebilirsiniz.\n\nSaygılarımızla,\nÇet-ka Körfez İş Sağlığı ve Güvenliği`,
+    });
+  }, [quote]);
 
   const handleStatusChange = useCallback(() => {
     if (!quote) return;
@@ -496,6 +508,44 @@ export default function QuoteDetailPage() {
     return null;
   }
 
+  const openEmailDialog = () => {
+    if (!quote) return;
+    setEmailDialogOpen(true);
+  };
+
+  const handleSendEmail = async () => {
+    if (!quote) return;
+    if (!emailData.to || !emailData.subject || !emailData.message) {
+      toast.error('Lütfen email adresi, konu ve mesaj alanlarını doldurun');
+      return;
+    }
+
+    try {
+      setIsSendingEmail(true);
+      const response = await fetch(`/api/quotes/${quote.id}/send-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send email');
+      }
+
+      toast.success('Teklif email ile gönderildi');
+      setEmailDialogOpen(false);
+      setIsSendingEmail(false);
+
+      if (quote.status === 'draft') {
+        setQuote({ ...quote, status: 'sent' });
+      }
+    } catch (error) {
+      console.error('Error sending email:', error);
+      toast.error('Email gönderilirken hata oluştu');
+      setIsSendingEmail(false);
+    }
+  };
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:gap-8 md:p-6">
       {/* Header */}
@@ -537,6 +587,18 @@ export default function QuoteDetailPage() {
               <Download className="w-4 h-4" />
             )}
             PDF İndir
+          </Button>
+          <Button
+            onClick={openEmailDialog}
+            disabled={isSendingEmail}
+            className="gap-2"
+          >
+            {isSendingEmail ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Mail className="w-4 h-4" />
+            )}
+            Email Gönder
           </Button>
           <Button variant="outline" onClick={handleStatusChange} className="gap-2">
             <Edit className="w-4 h-4" />
@@ -921,6 +983,72 @@ export default function QuoteDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Email Quote Dialog */}
+      <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Teklifi Email ile Gönder</DialogTitle>
+            <DialogDescription>
+              PDF otomatik oluşturulup email’e eklenecektir.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="email-to">Email Adresi *</Label>
+              <Input
+                id="email-to"
+                type="email"
+                placeholder="ornek@firma.com"
+                value={emailData.to}
+                onChange={(e) => setEmailData({ ...emailData, to: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email-subject">Konu *</Label>
+              <Input
+                id="email-subject"
+                value={emailData.subject}
+                onChange={(e) => setEmailData({ ...emailData, subject: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email-message">Mesaj *</Label>
+              <Textarea
+                id="email-message"
+                rows={6}
+                value={emailData.message}
+                onChange={(e) => setEmailData({ ...emailData, message: e.target.value })}
+              />
+            </div>
+            <div className="bg-muted p-3 rounded text-sm">
+              <p className="font-medium">Teklif Özeti</p>
+              <p className="text-muted-foreground">
+                {quote.quoteNumber} • {quote.company.name}
+              </p>
+              <p className="text-muted-foreground">Toplam: {formatCurrency(quote.total)}</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEmailDialogOpen(false)}
+              disabled={isSendingEmail}
+            >
+              İptal
+            </Button>
+            <Button
+              onClick={handleSendEmail}
+              disabled={isSendingEmail || !emailData.to || !emailData.subject || !emailData.message}
+              className="gap-2"
+            >
+              {isSendingEmail && <Loader2 className="w-4 h-4 animate-spin" />}
+              <Mail className="w-4 h-4" />
+              Gönder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Status Update Dialog */}
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>

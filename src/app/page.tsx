@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Building2, Calendar, Clock, ArrowRight, Activity, Loader2, Stethoscope, TrendingUp, TrendingDown, CheckCircle2, XCircle, MinusCircle, RefreshCw, Filter, X, BarChart3, Target, Timer, Percent, Users2, Bell, AlertCircle, FileWarning, CalendarDays, FileText } from 'lucide-react';
+import { Building2, Calendar, Clock, ArrowRight, Activity, Loader2, Stethoscope, TrendingUp, TrendingDown, CheckCircle2, XCircle, MinusCircle, RefreshCw, Filter, X, BarChart3, Timer, Percent, Users2, Bell, AlertCircle, FileWarning, CalendarDays, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
@@ -84,6 +84,21 @@ const ChartSkeleton = () => (
     <Skeleton className="h-[300px] w-full" />
   </div>
 );
+
+const ChartTooltipContent = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="rounded-xl border bg-card/90 px-3 py-2 shadow-sm text-sm">
+      <p className="text-[11px] uppercase tracking-[0.3em] text-muted-foreground">{label}</p>
+      {payload.map((item) => (
+        <p key={item.dataKey} className="font-semibold text-foreground">
+          {item.value}
+          {item.name && <span className="ml-1 text-xs text-muted-foreground">{item.name}</span>}
+        </p>
+      ))}
+    </div>
+  );
+};
 
 export default function Home() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -330,52 +345,45 @@ export default function Home() {
       });
   }, [filteredScreenings, getCompanyById]);
 
-  // NEW: This month target (example: 50 screenings)
-  const monthlyTarget = useMemo(() => {
-    const target = 50;
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    
-    const thisMonthCount = filteredScreenings.filter(s => {
-      const date = new Date(s.date);
-      return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
-    }).length;
-    
-    const progress = Math.round((thisMonthCount / target) * 100);
-    return { target, current: thisMonthCount, progress: Math.min(progress, 100) };
-  }, [filteredScreenings]);
-
   const heroStats = useMemo(
-    () => [
-      {
-        label: 'Bugün',
-        value: todayScreenings.length.toString(),
-        helper: 'planlanan randevu',
-        accent: 'from-primary/30 via-primary/10 to-background/60',
-      },
-      {
-        label: 'Bu Hafta',
-        value: weeklyComparison.thisWeek.toString(),
-        helper: weeklyComparison.isPositive
-          ? `%${Math.abs(weeklyComparison.change)} artış`
-          : `%${Math.abs(weeklyComparison.change)} düşüş`,
-        accent: 'from-blue-400/25 via-blue-500/10 to-background/60',
-      },
-      {
-        label: 'Tamamlanma',
-        value: `${screeningStats.completionRate}%`,
-        helper: 'başarı oranı',
-        accent: 'from-emerald-400/30 via-emerald-500/10 to-background/60',
-      },
-      {
-        label: 'Aylık Hedef',
-        value: `${monthlyTarget.progress}%`,
-        helper: `${monthlyTarget.current}/${monthlyTarget.target} tamamlandı`,
-        accent: 'from-purple-400/25 via-purple-500/10 to-background/60',
-      },
-    ],
-    [todayScreenings.length, weeklyComparison, completionRate, monthlyTarget]
+    () => {
+      const weeklyHelper = weeklyComparison.isPositive
+        ? `%${Math.abs(weeklyComparison.change)} artış`
+        : `%${Math.abs(weeklyComparison.change)} düşüş`;
+      const expiringTotal = documentStats?.expiringWithin30Days ?? expiringDocuments.length;
+
+      return [
+        {
+          label: 'Bugün',
+          value: todayScreenings.length.toString(),
+          helper: 'planlanan randevu',
+          icon: Calendar,
+          accent: 'from-primary/40 via-primary/10 to-transparent',
+        },
+        {
+          label: 'Bu Hafta',
+          value: weeklyComparison.thisWeek.toString(),
+          helper: weeklyHelper,
+          icon: CalendarDays,
+          accent: 'from-blue-400/30 via-blue-500/10 to-transparent',
+        },
+        {
+          label: 'Tamamlanma',
+          value: `${screeningStats.completionRate}%`,
+          helper: 'başarı oranı',
+          icon: CheckCircle2,
+          accent: 'from-emerald-400/30 via-emerald-500/10 to-transparent',
+        },
+        {
+          label: 'Süre Dolacak',
+          value: expiringTotal.toString(),
+          helper: expiringTotal === 0 ? 'takip gerekmiyor' : 'belge riskli',
+          icon: FileWarning,
+          accent: 'from-amber-400/30 via-amber-500/10 to-transparent',
+        },
+      ];
+    },
+    [todayScreenings.length, weeklyComparison, completionRate, documentStats, expiringDocuments.length]
   );
 
   // NEW: Weekly trend data
@@ -447,21 +455,6 @@ export default function Home() {
         title: 'Bugünkü Randevular',
         message: `${todayCount} adet randevu bugün gerçekleşecek`,
         icon: Calendar,
-      });
-    }
-
-    // Check for overdue screenings
-    const overdueCount = filteredScreenings.filter(s => {
-      const screeningDate = new Date(s.date);
-      return screeningDate < today && s.status === 'scheduled';
-    }).length;
-
-    if (overdueCount > 0) {
-      alertList.push({
-        type: 'warning' as const,
-        title: 'Geçmiş Randevular',
-        message: `${overdueCount} adet geçmiş randevu güncellenmeli`,
-        icon: AlertCircle,
       });
     }
 
@@ -560,118 +553,119 @@ export default function Home() {
             )}
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          {/* View Toggle */}
-          <div className="flex items-center gap-1 p-1 bg-muted/80 rounded-lg border border-border/70">
-            <Button
-              variant={selectedView === 'overview' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedView('overview')}
-              className="h-8 text-xs md:text-sm"
-            >
-              <Activity className="w-3 h-3 md:w-4 md:h-4 md:mr-1" />
-              <span className="hidden sm:inline">Genel</span>
-            </Button>
-            <Button
-              variant={selectedView === 'analytics' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedView('analytics')}
-              className="h-8 text-xs md:text-sm"
-            >
-              <BarChart3 className="w-3 h-3 md:w-4 md:h-4 md:mr-1" />
-              <span className="hidden sm:inline">Analizler</span>
-            </Button>
+        <div className="rounded-2xl border bg-card/70 p-3 shadow-sm flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <span className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground">Görünüm</span>
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-muted/60 backdrop-blur border border-border/50">
+              <Button
+                variant={selectedView === 'overview' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setSelectedView('overview')}
+                className="h-8 text-xs md:text-sm"
+              >
+                <Activity className="w-3 h-3 md:w-4 md:h-4 md:mr-1" />
+                <span className="hidden sm:inline">Genel</span>
+              </Button>
+              <Button
+                variant={selectedView === 'analytics' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setSelectedView('analytics')}
+                className="h-8 text-xs md:text-sm"
+              >
+                <BarChart3 className="w-3 h-3 md:w-4 md:h-4 md:mr-1" />
+                <span className="hidden sm:inline">Analizler</span>
+              </Button>
+            </div>
           </div>
 
-          {/* Auto-refresh toggle */}
-          <Button
-            variant={autoRefresh ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setAutoRefresh(!autoRefresh);
-              toast.success(autoRefresh ? 'Otomatik güncelleme kapatıldı' : 'Otomatik güncelleme açıldı (30 saniye)');
-            }}
-            className="gap-1 h-8 text-xs md:text-sm"
-          >
-            <Bell className="w-3 h-3 md:w-4 md:h-4" />
-            <span className="hidden sm:inline">{autoRefresh ? 'Aktif' : 'Oto-Güncelleme'}</span>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={autoRefresh ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setAutoRefresh(!autoRefresh);
+                toast.success(autoRefresh ? 'Otomatik güncelleme kapatıldı' : 'Otomatik güncelleme açıldı (30 saniye)');
+              }}
+              className="gap-1 h-8 text-xs md:text-sm"
+            >
+              <Bell className="w-3 h-3 md:w-4 md:h-4" />
+              <span className="hidden sm:inline">{autoRefresh ? 'Aktif' : 'Oto-Güncelleme'}</span>
+            </Button>
 
-          {/* Date Range Filter */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1 h-8 text-xs md:text-sm">
-                <Filter className="w-3 h-3 md:w-4 md:h-4" />
-                <span className="hidden sm:inline">Tarih Filtresi</span>
-                {isDateFilterActive && (
-                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] border border-border/60">
-                    Aktif
-                  </Badge>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80" align="end">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold">Tarih Aralığı</h4>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1 h-8 text-xs md:text-sm">
+                  <Filter className="w-3 h-3 md:w-4 md:h-4" />
+                  <span className="hidden sm:inline">Tarih Filtresi</span>
                   {isDateFilterActive && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearDateFilter}
-                      className="h-8 px-2"
-                    >
-                      <X className="w-4 h-4 mr-1" />
-                      Temizle
-                    </Button>
+                    <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] border border-border/60">
+                      Aktif
+                    </Badge>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80" align="end">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold">Tarih Aralığı</h4>
+                    {isDateFilterActive && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearDateFilter}
+                        className="h-8 px-2"
+                      >
+                        <X className="w-4 h-4 mr-1" />
+                        Temizle
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="start-date">Başlangıç Tarihi</Label>
+                      <Input
+                        id="start-date"
+                        type="date"
+                        value={dateRange.start}
+                        onChange={(e) =>
+                          setDateRange({ ...dateRange, start: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="end-date">Bitiş Tarihi</Label>
+                      <Input
+                        id="end-date"
+                        type="date"
+                        value={dateRange.end}
+                        onChange={(e) =>
+                          setDateRange({ ...dateRange, end: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+                  {isDateFilterActive && (
+                    <div className="pt-2 border-t">
+                      <p className="text-sm text-muted-foreground">
+                        {filteredScreenings.length} tarama gösteriliyor
+                      </p>
+                    </div>
                   )}
                 </div>
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="start-date">Başlangıç Tarihi</Label>
-                    <Input
-                      id="start-date"
-                      type="date"
-                      value={dateRange.start}
-                      onChange={(e) =>
-                        setDateRange({ ...dateRange, start: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="end-date">Bitiş Tarihi</Label>
-                    <Input
-                      id="end-date"
-                      type="date"
-                      value={dateRange.end}
-                      onChange={(e) =>
-                        setDateRange({ ...dateRange, end: e.target.value })
-                      }
-                    />
-                  </div>
-                </div>
-                {isDateFilterActive && (
-                  <div className="pt-2 border-t">
-                    <p className="text-sm text-muted-foreground">
-                      {filteredScreenings.length} tarama gösteriliyor
-                    </p>
-                  </div>
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
+              </PopoverContent>
+            </Popover>
 
-          {/* Refresh Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="gap-1 h-8"
-          >
-            <RefreshCw className={`w-3 h-3 md:w-4 md:h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Yenile</span>
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="gap-1 h-8"
+            >
+              <RefreshCw className={`w-3 h-3 md:w-4 md:h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Yenile</span>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -700,13 +694,24 @@ export default function Home() {
             </div>
           </div>
           <div className="grid w-full gap-3 grid-cols-1 sm:grid-cols-2 lg:w-auto lg:min-w-[420px]">
-            {heroStats.map((stat) => (
-              <div key={stat.label} className="rounded-2xl border bg-background px-4 py-3 text-foreground">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{stat.label}</p>
-                <p className="text-2xl font-semibold text-foreground">{stat.value}</p>
-                <p className="text-xs text-muted-foreground">{stat.helper}</p>
-              </div>
-            ))}
+            {heroStats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <div key={stat.label} className="relative overflow-hidden rounded-2xl border bg-card/80 px-4 py-4 text-foreground shadow-sm">
+                  <div className={`absolute inset-0 bg-linear-to-br ${stat.accent}`} />
+                  <div className="relative flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                      <span>{stat.label}</span>
+                      <span className="rounded-full border border-white/30 bg-background/70 p-2">
+                        <Icon className="w-4 h-4 text-foreground/80" />
+                      </span>
+                    </div>
+                    <p className="text-3xl font-semibold text-foreground">{stat.value}</p>
+                    <p className="text-xs text-muted-foreground">{stat.helper}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -777,72 +782,6 @@ export default function Home() {
 
       {selectedView === 'overview' ? (
         <>
-          {/* Quick Actions */}
-          <Card className="border">
-            <CardHeader className="p-3 sm:p-6">
-              <CardTitle className="text-base md:text-lg font-semibold tracking-tight">
-                Hızlı İşlemler
-              </CardTitle>
-              <CardDescription className="text-xs md:text-sm text-muted-foreground">
-                Sık kullanılan aksiyonlara anında erişim
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-3 sm:p-6 pt-0">
-              <div className="grid gap-2 md:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                <Link href="/calendar">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start h-auto py-3 px-3 border-border hover:border-foreground/40 hover:bg-muted transition-colors rounded-lg"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-muted rounded-lg">
-                        <CalendarDays className="w-4 h-4 text-foreground/80" />
-                      </div>
-                      <div className="text-left text-sm">
-                        <div className="font-semibold">Takvim</div>
-                        <div className="text-xs text-muted-foreground">Planları görüntüle</div>
-                      </div>
-                    </div>
-                  </Button>
-                </Link>
-
-                <Link href="/screenings/new">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start h-auto py-3 px-3 border-border hover:border-primary hover:bg-primary/5 transition-colors rounded-lg"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 rounded-lg">
-                        <Calendar className="w-4 h-4 text-primary" />
-                      </div>
-                      <div className="text-left text-sm">
-                        <div className="font-semibold">Yeni Randevu</div>
-                        <div className="text-xs text-muted-foreground">Tarama planla</div>
-                      </div>
-                    </div>
-                  </Button>
-                </Link>
-
-                <Link href="/companies">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start h-auto py-3 px-3 border-border hover:border-blue-500 hover:bg-blue-50 transition-colors rounded-lg"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-blue-500/10 rounded-lg">
-                        <Building2 className="w-4 h-4 text-blue-500" />
-                      </div>
-                      <div className="text-left text-sm">
-                        <div className="font-semibold">Firmalar</div>
-                        <div className="text-xs text-muted-foreground">{companies.length} kayıt</div>
-                      </div>
-                    </div>
-                  </Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Primary Stats Cards */}
           <div className="grid gap-3 md:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
             <Card className="border shadow-sm">
@@ -928,89 +867,69 @@ export default function Home() {
             </Card>
           </div>
 
-          {/* Monthly Target */}
-          <Card className="border-2 border-primary/20">
-            <CardHeader className="p-3 sm:p-6">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-base md:text-lg">
-                    <Target className="w-4 h-4 md:w-5 md:h-5 text-primary" />
-                    Aylık Hedef
-                  </CardTitle>
-                  <CardDescription className="text-xs md:text-sm">Bu ay için tarama hedefi</CardDescription>
-                </div>
-                <Badge variant="outline" className="text-sm md:text-lg px-2 md:px-3 py-0.5 md:py-1 w-fit">
-                  {monthlyTarget.current} / {monthlyTarget.target}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="p-3 sm:p-6 pt-0">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs md:text-sm">
-                  <span className="text-muted-foreground">İlerleme</span>
-                  <span className="font-bold">{monthlyTarget.progress}%</span>
-                </div>
-                <Progress value={monthlyTarget.progress} className="h-3" />
-                <div className="flex items-center justify-between text-xs md:text-sm text-muted-foreground pt-1">
-                  <span>Kalan: {monthlyTarget.target - monthlyTarget.current} tarama</span>
-                  <span>
-                    {monthlyTarget.progress >= 100 ? '🎉 Hedef tamamlandı!' : ''}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Today's Schedule and Status Summary */}
           <div className="grid gap-4 md:gap-6 grid-cols-1 lg:grid-cols-2">
             {/* Today's Screenings */}
-            <Card>
-              <CardHeader className="p-3 sm:p-6">
+            <Card className="border shadow-sm">
+              <CardHeader className="p-3 sm:p-6 pb-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Timer className="w-5 h-5 text-primary" />
                       Bugünkü Randevular
                     </CardTitle>
-                    <CardDescription>
-                      {new Date().toLocaleDateString('tr-TR', { 
-                        weekday: 'long', 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                      })}
+                    <CardDescription className="flex flex-col text-xs md:text-sm text-muted-foreground/90">
+                      <span>{new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+                      <span>{todayScreenings.length > 0 ? 'Planlanan ziyaretler aşağıda listelendi.' : 'Henüz randevu oluşturulmadı.'}</span>
                     </CardDescription>
                   </div>
-                  <Badge variant="secondary" className="text-lg px-3 py-1">
-                    {todayScreenings.length}
-                  </Badge>
+                  <div className="text-right">
+                    <Badge variant="secondary" className="text-lg px-4 py-1 rounded-full">
+                      {todayScreenings.length}
+                    </Badge>
+                    <p className="text-[11px] uppercase tracking-[0.3em] text-muted-foreground mt-1">adet</p>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-3 sm:p-6 pt-0">
                 {todayScreenings.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Calendar className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    <p className="text-sm">Bugün randevu yok</p>
+                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-muted/40 py-8 text-center text-muted-foreground gap-3">
+                    <Calendar className="w-12 h-12 opacity-50" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Bugün için randevu yok</p>
+                      <p className="text-xs text-muted-foreground">Takvimden yeni bir tarama planlayabilirsiniz.</p>
+                    </div>
+                    <Button asChild size="sm">
+                      <Link href="/screenings/new" className="gap-2">
+                        <Calendar className="w-4 h-4" /> Yeni Randevu Planla
+                      </Link>
+                    </Button>
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                  <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
                     {todayScreenings.map((screening) => {
                       const company = getCompanyById(screening.companyId);
                       return (
                         <Link key={screening.id} href={`/screenings/${screening.id}`}>
-                          <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
-                            <div className="flex flex-col items-center justify-center min-w-[60px] rounded-lg bg-muted px-3 py-2 text-primary">
+                          <div className="flex items-center gap-4 rounded-2xl border border-border/70 bg-card/90 p-3 shadow-sm transition hover:border-primary/60 hover:shadow-md">
+                            <div className="flex flex-col items-center justify-center min-w-[70px] rounded-xl bg-primary/10 px-3 py-2 text-primary">
                               <Clock className="w-4 h-4" />
-                              <span className="font-semibold text-sm">{screening.timeStart}</span>
+                              <span className="font-semibold text-base tracking-tight">{screening.timeStart}</span>
                             </div>
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 space-y-1">
                               <div className="font-semibold text-sm truncate">{company?.name}</div>
-                              <div className="text-xs text-muted-foreground flex items-center gap-2">
-                                <Users2 className="w-3 h-3" />
-                                {screening.employeeCount} katılımcı
+                              <div className="text-xs text-muted-foreground flex items-center gap-3">
+                                <span className="flex items-center gap-1">
+                                  <Users2 className="w-3 h-3" /> {screening.employeeCount} katılımcı
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Stethoscope className="w-3 h-3" /> {getStatusText(screening.status)}
+                                </span>
                               </div>
                             </div>
-                            <Badge variant="outline">{getStatusText(screening.status)}</Badge>
+                            <Badge variant="outline" className="rounded-full px-3">
+                              {screening.type === 'periodic' ? 'Periyodik' : screening.type === 'initial' ? 'İşe Giriş' : 'Özel'}
+                            </Badge>
                           </div>
                         </Link>
                       );
@@ -1079,51 +998,70 @@ export default function Home() {
           {/* Bottom Section: Upcoming, Recent Activity & Expiring Documents */}
           <div className="grid gap-4 md:gap-6 grid-cols-1 lg:grid-cols-3">
             {/* Upcoming Screenings */}
-            <Card>
-              <CardHeader className="p-3 sm:p-6">
+            <Card className="border shadow-sm">
+              <CardHeader className="p-3 sm:p-6 pb-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>Yaklaşan Randevular</CardTitle>
-                    <CardDescription>Önümüzdeki randevular</CardDescription>
+                    <CardTitle className="flex items-center gap-2">
+                      <CalendarDays className="w-5 h-5 text-primary" />
+                      Yaklaşan Randevular
+                    </CardTitle>
+                    <CardDescription>Önümüzdeki 5 ziyaret</CardDescription>
                   </div>
                   <Link href="/screenings">
-                    <Button variant="ghost" size="sm">
+                    <Button variant="ghost" size="sm" className="gap-1">
                       Tümü
-                      <ArrowRight className="w-4 h-4 ml-1" />
+                      <ArrowRight className="w-4 h-4" />
                     </Button>
                   </Link>
                 </div>
               </CardHeader>
               <CardContent className="p-3 sm:p-6 pt-0">
                 {upcomingScreenings.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Calendar className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    <p className="text-sm">Yaklaşan randevu yok</p>
+                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-muted/40 py-8 text-center text-muted-foreground gap-3">
+                    <Calendar className="w-12 h-12 opacity-50" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Yaklaşan randevu bulunamadı</p>
+                      <p className="text-xs text-muted-foreground">Takvimde yeni bir plan oluşturun veya filtreleri temizleyin.</p>
+                    </div>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href="/calendar" className="gap-2">
+                        <CalendarDays className="w-4 h-4" /> Takvimi Aç
+                      </Link>
+                    </Button>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {upcomingScreenings.slice(0, 5).map((screening) => {
                       const company = getCompanyById(screening.companyId);
                       const screeningDate = new Date(screening.date);
+                      const daysDiff = Math.ceil((screeningDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                       
                       return (
                         <Link key={screening.id} href={`/screenings/${screening.id}`}>
-                          <div className="flex items-center gap-3 p-2 border rounded-lg hover:bg-accent/50 transition-colors cursor-pointer">
-                            <div className="flex flex-col items-center justify-center min-w-[50px] p-2 bg-primary/10 rounded-lg">
-                              <div className="text-xs text-muted-foreground font-medium">
-                                {screeningDate.toLocaleDateString('tr-TR', { month: 'short' }).toUpperCase()}
+                          <div className="flex items-center gap-3 rounded-2xl border border-border/70 p-3 hover:border-primary/60 hover:shadow-md transition cursor-pointer">
+                            <div className="flex flex-col items-center justify-center min-w-[60px] p-2 bg-primary/10 rounded-xl">
+                              <div className="text-[10px] uppercase text-muted-foreground font-semibold">
+                                {screeningDate.toLocaleDateString('tr-TR', { month: 'short' })}
                               </div>
-                              <div className="text-lg font-bold text-primary">
+                              <div className="text-2xl font-bold text-primary leading-none">
                                 {screeningDate.getDate()}
                               </div>
                             </div>
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 space-y-1">
                               <div className="font-semibold text-sm truncate">{company?.name}</div>
-                              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                                <Clock className="w-3 h-3" />
-                                <span>{screening.timeStart}</span>
+                              <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" /> {screening.timeStart}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Users2 className="w-3 h-3" /> {screening.employeeCount} kişi
+                                </span>
                               </div>
                             </div>
+                            <Badge variant="secondary" className="rounded-full px-3 text-[11px]">
+                              {daysDiff <= 0 ? 'Bugün' : `${daysDiff} gün`}
+                            </Badge>
                           </div>
                         </Link>
                       );
@@ -1163,57 +1101,69 @@ export default function Home() {
             </Card>
 
             {/* Expiring Documents */}
-            <Card>
-              <CardHeader className="p-3 sm:p-6">
+            <Card className="border shadow-sm">
+              <CardHeader className="p-3 sm:p-6 pb-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <FileWarning className="w-5 h-5 text-orange-500" />
                       Süre Dolacak Dökümanlar
                     </CardTitle>
-                    <CardDescription>30 gün içinde</CardDescription>
+                    <CardDescription>Önümüzdeki 30 gün</CardDescription>
                   </div>
                   <Link href="/documents">
-                    <Button variant="ghost" size="sm">
+                    <Button variant="ghost" size="sm" className="gap-1">
                       Tümü
-                      <ArrowRight className="w-4 h-4 ml-1" />
+                      <ArrowRight className="w-4 h-4" />
                     </Button>
                   </Link>
                 </div>
               </CardHeader>
               <CardContent className="p-3 sm:p-6 pt-0">
                 {expiringDocuments.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <FileText className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    <p className="text-sm">Süre dolacak döküman yok</p>
+                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-muted/40 py-8 text-center text-muted-foreground gap-3">
+                    <FileText className="w-12 h-12 opacity-50" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Takip edilmesi gereken belge yok</p>
+                      <p className="text-xs text-muted-foreground">Sistem olası riskleri anında burada gösterecek.</p>
+                    </div>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href="/documents" className="gap-2">
+                        <FileText className="w-4 h-4" /> Belgeleri Görüntüle
+                      </Link>
+                    </Button>
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
                     {expiringDocuments.slice(0, 8).map((doc) => (
-                      <div key={doc.id} className="flex items-start gap-3 p-2 border rounded-lg hover:bg-accent/50 transition-colors">
-                        <div className={`mt-0.5 p-1.5 rounded-lg ${doc.isExpired ? 'bg-red-100 dark:bg-red-900/30' : 'bg-orange-100 dark:bg-orange-900/30'}`}>
+                      <div key={doc.id} className="flex items-start gap-3 rounded-2xl border border-border/70 p-3 hover:border-orange-400/70 hover:shadow-md transition">
+                        <div className={`mt-0.5 p-2 rounded-xl ${doc.isExpired ? 'bg-red-100 dark:bg-red-900/30' : 'bg-orange-100 dark:bg-orange-900/30'}`}>
                           {doc.isExpired ? (
-                            <FileWarning className="w-4 h-4 text-red-500" />
+                            <FileWarning className="w-5 h-5 text-red-500" />
                           ) : (
-                            <AlertCircle className="w-4 h-4 text-orange-500" />
+                            <AlertCircle className="w-5 h-5 text-orange-500" />
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{doc.title}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <Badge variant="outline" className="text-xs">
-                              {doc.isExpired ? (
-                                <span className="text-red-500">Süresi doldu</span>
-                              ) : (
-                                <span className="text-orange-500">{doc.daysUntilExpiry} gün kaldı</span>
-                              )}
-                            </Badge>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <p className="text-sm font-semibold truncate">{doc.title}</p>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            {doc.company?.name && (
+                              <span className="truncate">{doc.company.name}</span>
+                            )}
+                            {doc.employee?.fullName && (
+                              <span className="truncate">{doc.employee.fullName}</span>
+                            )}
                           </div>
-                          {(doc.company || doc.employee) && (
-                            <p className="text-xs text-muted-foreground mt-1 truncate">
-                              {doc.company?.name || doc.employee?.fullName}
-                            </p>
-                          )}
+                          <div className="flex items-center justify-between pt-1">
+                            <Badge variant="outline" className={`text-xs ${doc.isExpired ? 'text-red-600' : 'text-orange-600'}`}>
+                              {doc.isExpired ? 'Süresi Doldu' : `${doc.daysUntilExpiry} gün kaldı`}
+                            </Badge>
+                            {!doc.isExpired && (
+                              <div className="w-32">
+                                <Progress value={Math.max(0, 100 - (doc.daysUntilExpiry / 30) * 100)} className="h-1.5" />
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1224,162 +1174,187 @@ export default function Home() {
           </div>
         </>
       ) : (
-        <>
+        <div className="space-y-4">
           {/* Analytics View */}
-          <Card>
+          <Card className="border shadow-sm">
             <CardHeader className="p-3 sm:p-6">
-              <CardTitle className="text-base md:text-lg">Detaylı Analizler</CardTitle>
-              <CardDescription className="text-xs md:text-sm">Tarama verilerinizin grafiksel gösterimi</CardDescription>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle className="text-base md:text-lg">Detaylı Analizler</CardTitle>
+                  <CardDescription className="text-xs md:text-sm">Tarama trendleri, katılım oranları ve durum dağılımı</CardDescription>
+                </div>
+                <Badge variant="outline" className="uppercase tracking-[0.2em] text-[11px]">
+                  Güncel veri
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent className="p-3 sm:p-6 pt-0">
-              <Tabs defaultValue="monthly" className="space-y-4">
-                <TabsList className="grid w-full grid-cols-4 h-auto">
-                  <TabsTrigger value="monthly" className="text-xs md:text-sm py-2">Aylık</TabsTrigger>
-                  <TabsTrigger value="weekly" className="text-xs md:text-sm py-2">Haftalık</TabsTrigger>
-                  <TabsTrigger value="status" className="text-xs md:text-sm py-2">Durum</TabsTrigger>
-                  <TabsTrigger value="type" className="text-xs md:text-sm py-2">Tip</TabsTrigger>
-                </TabsList>
+            <CardContent className="p-3 sm:p-6 pt-0 space-y-4">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {[{
+                  label: 'Toplam Tarama',
+                  value: filteredScreenings.length.toString(),
+                  helper: 'seçilen aralıkta',
+                }, {
+                  label: 'Bu Hafta',
+                  value: weeklyComparison.thisWeek.toString(),
+                  helper: `Geçen hafta: ${weeklyComparison.lastWeek}`,
+                }, {
+                  label: 'Tamamlanma',
+                  value: `${completionRate}%`,
+                  helper: 'başarı oranı',
+                }, {
+                  label: 'İptal / Gelmedi',
+                  value: `${statusCounts.cancelled} / ${statusCounts['no-show']}`,
+                  helper: 'riskli kayıtlar',
+                }].map((stat) => (
+                  <div key={stat.label} className="rounded-2xl border bg-card/80 px-4 py-3">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{stat.label}</p>
+                    <p className="text-2xl font-semibold text-foreground">{stat.value}</p>
+                    <p className="text-xs text-muted-foreground">{stat.helper}</p>
+                  </div>
+                ))}
+              </div>
 
-                <TabsContent value="monthly" className="space-y-4">
-                  {typeof window === 'undefined' ? (
-                    <ChartSkeleton />
-                  ) : (
-                    <div className="w-full overflow-x-auto">
-                      <div className="min-w-[500px]">
-                        <ResponsiveContainer width="100%" height={250} className="md:h-[350px]">
-                          <BarChart data={monthlyData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                            <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <Tooltip 
-                              contentStyle={{ 
-                                backgroundColor: 'hsl(var(--popover))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
-                                color: 'hsl(var(--popover-foreground))'
-                              }}
-                            />
-                            <Bar dataKey="tarama" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
-                </TabsContent>
+              <div className="rounded-2xl border bg-card/70 p-3 sm:p-4">
+                <Tabs defaultValue="monthly" className="space-y-4">
+                  <TabsList className="grid w-full grid-cols-4 h-auto bg-muted/60 rounded-xl">
+                    <TabsTrigger value="monthly" className="text-xs md:text-sm py-2">Aylık</TabsTrigger>
+                    <TabsTrigger value="weekly" className="text-xs md:text-sm py-2">Haftalık</TabsTrigger>
+                    <TabsTrigger value="status" className="text-xs md:text-sm py-2">Durum</TabsTrigger>
+                    <TabsTrigger value="type" className="text-xs md:text-sm py-2">Tip</TabsTrigger>
+                  </TabsList>
 
-                <TabsContent value="weekly" className="space-y-4">
-                  {typeof window === 'undefined' ? (
-                    <ChartSkeleton />
-                  ) : (
-                    <div className="w-full overflow-x-auto">
-                      <div className="min-w-[500px]">
-                        <ResponsiveContainer width="100%" height={250}>
-                          <LineChart data={weeklyTrendData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                            <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <Tooltip 
-                              contentStyle={{ 
-                                backgroundColor: 'hsl(var(--popover))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
-                                color: 'hsl(var(--popover-foreground))'
-                              }}
-                            />
-                            <Line 
-                              type="monotone" 
-                              dataKey="tarama" 
-                              stroke="hsl(var(--primary))" 
-                              strokeWidth={2}
-                              dot={{ fill: 'hsl(var(--primary))', r: 4 }}
-                              activeDot={{ r: 6 }}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
+                  <TabsContent value="monthly" className="space-y-4">
+                    {typeof window === 'undefined' ? (
+                      <ChartSkeleton />
+                    ) : (
+                      <div className="w-full overflow-x-auto">
+                        <div className="min-w-[500px]">
+                          <ResponsiveContainer width="100%" height={260} className="md:h-[340px]">
+                            <BarChart data={monthlyData}>
+                              <defs>
+                                <linearGradient id="monthlyBarGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.9} />
+                                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                              <Tooltip content={<ChartTooltipContent />} cursor={{ fill: 'hsl(var(--primary) / 0.1)' }} />
+                              <Bar dataKey="tarama" fill="url(#monthlyBarGradient)" radius={[10, 10, 0, 0]} />
+                              <Legend wrapperStyle={{ paddingTop: 8 }} formatter={() => 'Toplam Tarama'} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </TabsContent>
+                    )}
+                  </TabsContent>
 
-                <TabsContent value="status" className="space-y-4">
-                  {typeof window === 'undefined' ? (
-                    <ChartSkeleton />
-                  ) : (
-                    <div className="w-full overflow-x-auto">
-                      <div className="min-w-[400px]">
-                        <ResponsiveContainer width="100%" height={250}>
-                          <PieChart>
-                            <Pie
-                              data={statusData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={70}
-                              outerRadius={120}
-                              fill="#8884d8"
-                              paddingAngle={5}
-                              dataKey="value"
-                              label={(entry) => `${entry.name}: ${entry.value}`}
-                            >
-                              {statusData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip 
-                              contentStyle={{ 
-                                backgroundColor: 'hsl(var(--popover))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
-                                color: 'hsl(var(--popover-foreground))'
-                              }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
+                  <TabsContent value="weekly" className="space-y-4">
+                    {typeof window === 'undefined' ? (
+                      <ChartSkeleton />
+                    ) : (
+                      <div className="w-full overflow-x-auto">
+                        <div className="min-w-[500px]">
+                          <ResponsiveContainer width="100%" height={260}>
+                            <LineChart data={weeklyTrendData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                              <Tooltip content={<ChartTooltipContent />} />
+                              <Line 
+                                type="monotone" 
+                                dataKey="tarama" 
+                                stroke="hsl(var(--primary))" 
+                                strokeWidth={2}
+                                dot={{ fill: 'hsl(var(--primary))', r: 4, strokeWidth: 0 }}
+                                activeDot={{ r: 6, strokeWidth: 0 }}
+                              />
+                              <Legend wrapperStyle={{ paddingTop: 8 }} formatter={() => 'Haftalık Tarama'} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </TabsContent>
+                    )}
+                  </TabsContent>
 
-                <TabsContent value="type" className="space-y-4">
-                  {typeof window === 'undefined' ? (
-                    <ChartSkeleton />
-                  ) : (
-                    <div className="w-full overflow-x-auto">
-                      <div className="min-w-[400px]">
-                        <ResponsiveContainer width="100%" height={250}>
-                          <PieChart>
-                            <Pie
-                              data={typeData}
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={120}
-                              fill="#8884d8"
-                              dataKey="value"
-                              label={(entry) => `${entry.name}: ${entry.value}`}
-                            >
-                              {typeData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip 
-                              contentStyle={{ 
-                                backgroundColor: 'hsl(var(--popover))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
-                                color: 'hsl(var(--popover-foreground))'
-                              }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
+                  <TabsContent value="status" className="space-y-4">
+                    {typeof window === 'undefined' ? (
+                      <ChartSkeleton />
+                    ) : statusData.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-border/60 bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                        Seçilen aralık için durum dağılımı bulunmuyor.
                       </div>
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
+                    ) : (
+                      <div className="w-full overflow-x-auto">
+                        <div className="min-w-[400px]">
+                          <ResponsiveContainer width="100%" height={260}>
+                            <PieChart>
+                              <Pie
+                                data={statusData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={70}
+                                outerRadius={120}
+                                paddingAngle={4}
+                                dataKey="value"
+                                labelLine={false}
+                                label={(entry) => `${entry.value}`}
+                              >
+                                {statusData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip content={<ChartTooltipContent />} />
+                              <Legend verticalAlign="bottom" height={36} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="type" className="space-y-4">
+                    {typeof window === 'undefined' ? (
+                      <ChartSkeleton />
+                    ) : typeData.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-border/60 bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                        Bu dönemde tarama tipi kaydı yok.
+                      </div>
+                    ) : (
+                      <div className="w-full overflow-x-auto">
+                        <div className="min-w-[400px]">
+                          <ResponsiveContainer width="100%" height={260}>
+                            <PieChart>
+                              <Pie
+                                data={typeData}
+                                cx="50%"
+                                cy="50%"
+                                outerRadius={120}
+                                dataKey="value"
+                                labelLine={false}
+                                label={(entry) => `${entry.value}`}
+                              >
+                                {typeData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip content={<ChartTooltipContent />} />
+                              <Legend verticalAlign="bottom" height={36} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </div>
             </CardContent>
           </Card>
 
           {/* Top Companies Chart */}
-          <Card>
+          <Card className="border shadow-sm">
             <CardHeader className="p-3 sm:p-6">
               <CardTitle className="text-base md:text-lg">En Aktif Firmalar</CardTitle>
               <CardDescription className="text-xs md:text-sm">Firma bazlı tarama sayıları</CardDescription>
@@ -1387,10 +1362,14 @@ export default function Home() {
             <CardContent className="p-3 sm:p-6 pt-0">
               {typeof window === 'undefined' ? (
                 <ChartSkeleton />
+              ) : topCompanies.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/60 bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                  Bu filtrelerle firma istatistiği bulunamadı. Tarih aralığını genişletmeyi deneyin.
+                </div>
               ) : (
                 <div className="w-full overflow-x-auto">
                   <div className="min-w-[500px]">
-                    <ResponsiveContainer width="100%" height={250} className="md:h-[300px]">
+                    <ResponsiveContainer width="100%" height={260} className="md:h-[300px]">
                       <BarChart data={topCompanies} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
@@ -1417,7 +1396,7 @@ export default function Home() {
               )}
             </CardContent>
           </Card>
-        </>
+        </div>
       )}
     </div>
   );

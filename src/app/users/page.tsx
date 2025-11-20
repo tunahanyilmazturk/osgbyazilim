@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -57,6 +64,11 @@ import {
   XSquare,
   ChevronUp,
   ChevronDown,
+  Upload,
+  FileSpreadsheet,
+  Plus,
+  X,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -94,6 +106,16 @@ type CurrentUser = {
   fullName: string;
   email: string;
   role: User["role"];
+};
+
+type BulkUserRow = {
+  id: string;
+  fullName: string;
+  email: string;
+  password: string;
+  role: User["role"];
+  department: string;
+  phone: string;
 };
 
 const roleLabels = {
@@ -191,8 +213,27 @@ export default function UsersPage() {
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
 
+  const [isBulkAddDialogOpen, setIsBulkAddDialogOpen] = useState(false);
+  const [bulkAddTab, setBulkAddTab] = useState<'manual' | 'file'>('manual');
+  const [bulkUserRows, setBulkUserRows] = useState<BulkUserRow[]>([
+    { id: '1', fullName: '', email: '', password: '', role: 'user', department: '', phone: '' },
+  ]);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkPreviewRows, setBulkPreviewRows] = useState<BulkUserRow[]>([]);
+  const [bulkFileErrors, setBulkFileErrors] = useState<string[]>([]);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
+
   const hasActiveFilters =
     searchQuery.trim() !== "" || roleFilter !== "all" || statusFilter !== "all";
+
+  const filledBulkRowCount = useMemo(
+    () =>
+      bulkUserRows.filter(
+        (row) => row.fullName.trim() || row.email.trim() || row.password.trim()
+      ).length,
+    [bulkUserRows]
+  );
 
   // Reset page when filters or search change
   useEffect(() => {
@@ -397,6 +438,340 @@ export default function UsersPage() {
       return field;
     });
   };
+
+  const handleOpenBulkAddDialog = useCallback(() => {
+    setBulkAddTab('manual');
+    setBulkUserRows([{ id: '1', fullName: '', email: '', password: '', role: 'user', department: '', phone: '' }]);
+    setBulkFile(null);
+    setBulkPreviewRows([]);
+    setBulkFileErrors([]);
+    setIsBulkAddDialogOpen(true);
+  }, []);
+
+  const handleCloseBulkAddDialog = useCallback(() => {
+    setIsBulkAddDialogOpen(false);
+    setBulkAddTab('manual');
+    setBulkUserRows([{ id: '1', fullName: '', email: '', password: '', role: 'user', department: '', phone: '' }]);
+    setBulkFile(null);
+    setBulkPreviewRows([]);
+    setBulkFileErrors([]);
+    setIsProcessingFile(false);
+    setIsBulkSaving(false);
+  }, []);
+
+  const handleAddBulkUserRow = useCallback(() => {
+    setBulkUserRows((prev) => {
+      const nextId = prev.length ? Math.max(...prev.map((row) => parseInt(row.id))) + 1 : 1;
+      return [...prev, { id: String(nextId), fullName: '', email: '', password: '', role: 'user', department: '', phone: '' }];
+    });
+  }, []);
+
+  const handleRemoveBulkUserRow = useCallback((id: string) => {
+    setBulkUserRows((prev) => {
+      if (prev.length === 1) {
+        toast.error('En az bir satır olmalıdır');
+        return prev;
+      }
+      return prev.filter((row) => row.id !== id);
+    });
+  }, []);
+
+  const handleBulkUserRowChange = useCallback((id: string, field: keyof Omit<BulkUserRow, 'id'>, value: string) => {
+    setBulkUserRows((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+  }, []);
+
+  const handleDownloadUserTemplate = useCallback(() => {
+    const headers = ['Ad Soyad *', 'E-posta *', 'Şifre *', 'Rol (admin/manager/user/viewer)', 'Departman', 'Telefon'];
+    const existingRows = users.slice(0, 50).map((user) => [
+      user.fullName,
+      user.email,
+      '******',
+      user.role,
+      user.department || '',
+      user.phone || '',
+    ]);
+    const exampleRows = existingRows.length
+      ? []
+      : [
+          ['Ayşe Sağlam', 'ayse@example.com', 'Sifre123', 'manager', 'İş Güvenliği', '+90 532 000 0000'],
+          ['Mert Yılmaz', 'mert@example.com', 'Sifre456', 'user', 'Laboratuvar', '+90 533 000 0000'],
+        ];
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...existingRows, ...exampleRows]);
+    worksheet['!cols'] = [
+      { wch: 28 },
+      { wch: 32 },
+      { wch: 12 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 18 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Kullanicilar');
+    XLSX.writeFile(workbook, 'kullanici-toplu-ekleme-sablonu.xlsx');
+    toast.success('Örnek kullanıcı şablonu indirildi');
+  }, [users]);
+
+  const handleManualBulkSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const rowsToProcess = bulkUserRows.filter((row) =>
+      row.fullName.trim() || row.email.trim() || row.password.trim()
+    );
+
+    if (rowsToProcess.length === 0) {
+      toast.error('Lütfen en az bir kullanıcı satırı doldurun');
+      return;
+    }
+
+    const errors: string[] = [];
+    const usersToCreate: Array<{ fullName: string; email: string; password: string; role: User['role']; phone?: string; department?: string; }> = [];
+
+    rowsToProcess.forEach((row, index) => {
+      const line = index + 1;
+      const rowErrors: string[] = [];
+      const fullName = row.fullName.trim();
+      const email = row.email.trim();
+      const password = row.password.trim();
+      const normalizedRole = (row.role || 'user').toLowerCase() as User['role'];
+
+      if (!fullName) {
+        rowErrors.push(`Satır ${line}: Ad Soyad zorunludur`);
+      }
+
+      if (!email) {
+        rowErrors.push(`Satır ${line}: E-posta zorunludur`);
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        rowErrors.push(`Satır ${line}: Geçersiz e-posta (${email})`);
+      }
+
+      if (!password || password.length < 6) {
+        rowErrors.push(`Satır ${line}: Şifre en az 6 karakter olmalıdır`);
+      }
+
+      if (!['admin', 'manager', 'user', 'viewer'].includes(normalizedRole)) {
+        rowErrors.push(`Satır ${line}: Geçersiz rol (${row.role})`);
+      }
+
+      if (rowErrors.length === 0) {
+        usersToCreate.push({
+          fullName,
+          email,
+          password,
+          role: normalizedRole,
+          phone: row.phone.trim() || undefined,
+          department: row.department.trim() || undefined,
+        });
+      } else {
+        errors.push(...rowErrors);
+      }
+    });
+
+    if (errors.length > 0) {
+      toast.error(
+        <div>
+          <div className="font-semibold">Hatalar bulundu:</div>
+          {errors.slice(0, 3).map((err, i) => (
+            <div key={i} className="text-sm">{err}</div>
+          ))}
+          {errors.length > 3 && <div className="text-sm">... ve {errors.length - 3} hata daha</div>}
+        </div>
+      );
+      return;
+    }
+
+    try {
+      setIsBulkSaving(true);
+      const results = await Promise.allSettled(
+        usersToCreate.map((user) =>
+          fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fullName: user.fullName,
+              email: user.email,
+              password: user.password,
+              role: user.role,
+              phone: user.phone || null,
+              department: user.department || null,
+            }),
+          })
+        )
+      );
+
+      const successCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failCount = results.length - successCount;
+
+      if (successCount > 0) {
+        toast.success(`${successCount} kullanıcı eklendi${failCount ? `, ${failCount} kullanıcı eklenemedi` : ''}`);
+      } else {
+        toast.error('Kullanıcılar eklenirken hata oluştu');
+      }
+
+      handleCloseBulkAddDialog();
+      loadUsers();
+      loadStats();
+    } catch (error) {
+      console.error('Error adding users in bulk:', error);
+      toast.error('Toplu kullanıcı eklenirken hata oluştu');
+    } finally {
+      setIsBulkSaving(false);
+    }
+  }, [bulkUserRows, handleCloseBulkAddDialog, loadUsers, loadStats]);
+
+  const handleBulkFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setBulkFile(file);
+    setIsProcessingFile(true);
+    setBulkFileErrors([]);
+    setBulkPreviewRows([]);
+
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const rows: BulkUserRow[] = [];
+
+        const parseRow = (values: any[], index: number) => {
+          const fullName = String(values[0] || '').trim();
+          const email = String(values[1] || '').trim();
+          const password = String(values[2] || '').trim();
+          const roleValue = String(values[3] || 'user').trim().toLowerCase();
+          const department = String(values[4] || '').trim();
+          const phone = String(values[5] || '').trim();
+
+          if (!fullName && !email) return;
+
+          rows.push({
+            id: String(index),
+            fullName,
+            email,
+            password,
+            role: (roleValue || 'user') as User['role'],
+            department,
+            phone,
+          });
+        };
+
+        if (file.name.endsWith('.csv')) {
+          const text = new TextDecoder('utf-8').decode(data as ArrayBuffer);
+          const lines = text.split(/\r?\n/).filter((line) => line.trim());
+          for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
+            parseRow(values, i + 1);
+          }
+        } else {
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          for (let i = 1; i < jsonData.length; i++) {
+            parseRow(jsonData[i], i + 1);
+          }
+        }
+
+        const errors: string[] = [];
+        const preview: BulkUserRow[] = [];
+
+        rows.forEach((row, index) => {
+          const line = index + 2;
+          if (!row.fullName) {
+            errors.push(`Satır ${line}: Ad Soyad zorunludur`);
+            return;
+          }
+          if (!row.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) {
+            errors.push(`Satır ${line}: Geçersiz e-posta`);
+            return;
+          }
+          if (!row.password || row.password.length < 6) {
+            errors.push(`Satır ${line}: Şifre en az 6 karakter olmalıdır`);
+            return;
+          }
+          if (!['admin', 'manager', 'user', 'viewer'].includes(row.role)) {
+            errors.push(`Satır ${line}: Geçersiz rol (${row.role})`);
+            return;
+          }
+          preview.push({ ...row, role: row.role as User['role'] });
+        });
+
+        setBulkPreviewRows(preview);
+        setBulkFileErrors(errors);
+
+        if (preview.length > 0 && errors.length === 0) {
+          toast.success(`${preview.length} kullanıcı verisi hazır`);
+        } else if (preview.length > 0) {
+          toast.warning(`${preview.length} satır yüklendi, ${errors.length} hata var`);
+        } else {
+          toast.error('Dosyada geçerli veri bulunamadı');
+        }
+      } catch (error) {
+        console.error('Error processing user file:', error);
+        setBulkFileErrors(['Dosya okunurken hata oluştu']);
+        toast.error('Dosya işlenemedi, formatı kontrol edin');
+      } finally {
+        setIsProcessingFile(false);
+      }
+    };
+
+    reader.onerror = () => {
+      toast.error('Dosya okunamadı');
+      setIsProcessingFile(false);
+    };
+
+    reader.readAsArrayBuffer(file);
+  }, []);
+
+  const handleBulkFileImport = useCallback(async () => {
+    if (bulkPreviewRows.length === 0) {
+      toast.error('Yüklenecek kullanıcı yok');
+      return;
+    }
+
+    if (bulkFileErrors.length > 0) {
+      toast.error('Lütfen önce dosya hatalarını düzeltin');
+      return;
+    }
+
+    try {
+      setIsBulkSaving(true);
+      const results = await Promise.allSettled(
+        bulkPreviewRows.map((row) =>
+          fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fullName: row.fullName,
+              email: row.email,
+              password: row.password,
+              role: row.role,
+              department: row.department || null,
+              phone: row.phone || null,
+            }),
+          })
+        )
+      );
+
+      const successCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failCount = results.length - successCount;
+
+      if (successCount > 0) {
+        toast.success(`${successCount} kullanıcı eklendi${failCount ? `, ${failCount} kullanıcı eklenemedi` : ''}`);
+      } else {
+        toast.error('Kullanıcılar eklenirken hata oluştu');
+      }
+
+      handleCloseBulkAddDialog();
+      loadUsers();
+      loadStats();
+    } catch (error) {
+      console.error('Error importing users:', error);
+      toast.error('Toplu kullanıcı eklenirken hata oluştu');
+    } finally {
+      setIsBulkSaving(false);
+    }
+  }, [bulkPreviewRows, bulkFileErrors, handleCloseBulkAddDialog, loadUsers, loadStats]);
 
   const renderSortIcon = (field: "name" | "role" | "department" | "lastLogin") => {
     if (sortField !== field) return null;
@@ -732,6 +1107,15 @@ export default function UsersPage() {
           >
             <Download className="w-4 h-4" />
             Excel Export
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleOpenBulkAddDialog}
+          >
+            <Users className="w-4 h-4" />
+            Toplu Ekle
           </Button>
           <Button
             onClick={() => {
@@ -1238,6 +1622,241 @@ export default function UsersPage() {
               {isProcessing ? "İşleniyor..." : "Onayla"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Add Users Dialog */}
+      <Dialog open={isBulkAddDialogOpen} onOpenChange={(open) => (open ? setIsBulkAddDialogOpen(true) : handleCloseBulkAddDialog())}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Toplu Kullanıcı Ekle</DialogTitle>
+            <DialogDescription>
+              Excel/CSV dosyasından yükleyin veya aşağıdaki tabloda kullanıcıları manuel girin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs value={bulkAddTab} onValueChange={(val) => setBulkAddTab(val as 'manual' | 'file')} className="flex-1 flex flex-col overflow-hidden">
+            <TabsList className="grid grid-cols-2 rounded-xl bg-muted/60 p-1">
+              <TabsTrigger value="file" className="rounded-xl">Dosyadan Yükle</TabsTrigger>
+              <TabsTrigger value="manual" className="rounded-xl">Manuel Ekle</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="file" className="flex-1 flex flex-col mt-4 space-y-4 overflow-hidden">
+              <div className="border-2 border-dashed rounded-xl p-6 text-center">
+                <FileSpreadsheet className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-base font-semibold mb-1">Excel veya CSV yükleyin</p>
+                <p className="text-sm text-muted-foreground mb-4">Başlık sırası: Ad Soyad, E-posta, Şifre, Rol, Departman, Telefon</p>
+                <div className="flex items-center justify-center gap-3 flex-wrap">
+                  <Button variant="outline" onClick={() => document.getElementById('bulk-user-file')?.click()} disabled={isProcessingFile}>
+                    {isProcessingFile ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Dosya işleniyor...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" /> Dosya Seç
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="ghost" onClick={handleDownloadUserTemplate}>
+                    <Download className="w-4 h-4 mr-2" /> Şablon İndir
+                  </Button>
+                </div>
+                <input
+                  id="bulk-user-file"
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={handleBulkFileUpload}
+                />
+                {bulkFile && !isProcessingFile && (
+                  <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-sm">
+                    <FileSpreadsheet className="w-4 h-4" />
+                    {bulkFile.name}
+                  </div>
+                )}
+              </div>
+
+              <Alert>
+                <AlertDescription className="text-xs space-y-1">
+                  <p>• Rol alanı boşsa otomatik olarak "user" atanır.</p>
+                  <p>• Şifre sütunundaki değerler en az 6 karakter olmalıdır.</p>
+                  <p>• Aynı e-posta sistemde mevcutsa satır hata verir.</p>
+                  <p>• Şablondaki "******" örneklerini yüklemeden önce gerçek şifrelerle değiştirin.</p>
+                </AlertDescription>
+              </Alert>
+
+              {bulkFileErrors.length > 0 && (
+                <Alert variant="destructive">
+                  <AlertDescription className="text-xs space-y-1">
+                    {bulkFileErrors.slice(0, 5).map((err, i) => (
+                      <div key={i}>{err}</div>
+                    ))}
+                    {bulkFileErrors.length > 5 && (
+                      <div>... ve {bulkFileErrors.length - 5} hata daha</div>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {bulkPreviewRows.length > 0 && (
+                <div className="border rounded-xl flex-1 flex flex-col overflow-hidden">
+                  <div className="px-4 py-2 bg-muted text-sm font-medium flex items-center justify-between">
+                    <span>Önizleme ({bulkPreviewRows.length} satır)</span>
+                    {bulkFileErrors.length === 0 ? (
+                      <span className="text-green-600 text-xs">Tüm satırlar hazır</span>
+                    ) : (
+                      <span className="text-amber-600 text-xs">{bulkFileErrors.length} hata bulunuyor</span>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/70 sticky top-0 text-xs">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Ad Soyad</th>
+                          <th className="px-3 py-2 text-left">E-posta</th>
+                          <th className="px-3 py-2 text-left">Rol</th>
+                          <th className="px-3 py-2 text-left">Departman</th>
+                          <th className="px-3 py-2 text-left">Telefon</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkPreviewRows.map((row) => (
+                          <tr key={row.id} className="border-t">
+                            <td className="px-3 py-1.5">{row.fullName}</td>
+                            <td className="px-3 py-1.5">{row.email}</td>
+                            <td className="px-3 py-1.5">{roleLabels[row.role]}</td>
+                            <td className="px-3 py-1.5">{row.department || '-'}</td>
+                            <td className="px-3 py-1.5">{row.phone || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter className="pt-2">
+                <Button variant="outline" onClick={handleCloseBulkAddDialog} disabled={isBulkSaving || isProcessingFile}>
+                  İptal
+                </Button>
+                <Button onClick={handleBulkFileImport} disabled={isBulkSaving || isProcessingFile || bulkPreviewRows.length === 0 || bulkFileErrors.length > 0}>
+                  {isBulkSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Ekleniyor...
+                    </>
+                  ) : (
+                    `${bulkPreviewRows.length} Kullanıcıyı Ekle`
+                  )}
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+
+            <TabsContent value="manual" className="flex-1 flex flex-col mt-4 overflow-hidden">
+              <form onSubmit={handleManualBulkSubmit} className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-y-auto space-y-3">
+                  <div className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_1fr_1.2fr_0.4fr] gap-3 px-1 text-xs font-medium text-muted-foreground">
+                    <div>Ad Soyad *</div>
+                    <div>E-posta *</div>
+                    <div>Şifre *</div>
+                    <div>Rol</div>
+                    <div>Departman</div>
+                    <div>Telefon</div>
+                    <div></div>
+                  </div>
+                  {bulkUserRows.map((row, index) => (
+                    <div key={row.id} className="grid grid-cols-[1.5fr_1.5fr_1fr_1fr_1fr_1.2fr_0.4fr] gap-3 items-start">
+                      <Input
+                        placeholder={`Kullanıcı ${index + 1}`}
+                        value={row.fullName}
+                        onChange={(e) => handleBulkUserRowChange(row.id, 'fullName', e.target.value)}
+                      />
+                      <Input
+                        type="email"
+                        placeholder="eposta@ornek.com"
+                        value={row.email}
+                        onChange={(e) => handleBulkUserRowChange(row.id, 'email', e.target.value)}
+                      />
+                      <Input
+                        type="text"
+                        placeholder="Şifre"
+                        value={row.password}
+                        onChange={(e) => handleBulkUserRowChange(row.id, 'password', e.target.value)}
+                      />
+                      <Select value={row.role} onValueChange={(val) => handleBulkUserRowChange(row.id, 'role', val)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Rol" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="manager">Yönetici</SelectItem>
+                          <SelectItem value="user">Kullanıcı</SelectItem>
+                          <SelectItem value="viewer">Görüntüleyici</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        placeholder="Departman"
+                        value={row.department}
+                        onChange={(e) => handleBulkUserRowChange(row.id, 'department', e.target.value)}
+                      />
+                      <Input
+                        placeholder="Telefon"
+                        value={row.phone}
+                        onChange={(e) => handleBulkUserRowChange(row.id, 'phone', e.target.value)}
+                      />
+                      <div className="flex items-center justify-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveBulkUserRow(row.id)}
+                          disabled={bulkUserRows.length === 1}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" className="w-full" onClick={handleAddBulkUserRow}>
+                      <Plus className="w-4 h-4 mr-2" /> Satır Ekle
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                    <span>
+                      {filledBulkRowCount === 0
+                        ? 'Henüz satır doldurmadınız'
+                        : `${filledBulkRowCount} satır dolduruldu`}
+                    </span>
+                    <span>Her satırda ad, e-posta ve şifre bulunmalıdır.</span>
+                  </div>
+                  <div className="p-3 bg-muted/60 rounded-lg text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium text-foreground">İpuçları</p>
+                    <p>• Şifre alanını boş bırakamazsınız.</p>
+                    <p>• Rol alanını boş bırakırsanız otomatik olarak kullanıcı atanır.</p>
+                    <p>• Telefon ve departman alanları isteğe bağlıdır.</p>
+                    <p>• Excel şablonundaki "******" örneklerini gerçek şifrelerle değiştirin.</p>
+                  </div>
+                </div>
+                <DialogFooter className="pt-2">
+                  <Button type="button" variant="outline" onClick={handleCloseBulkAddDialog} disabled={isBulkSaving}>
+                    İptal
+                  </Button>
+                  <Button type="submit" disabled={isBulkSaving || filledBulkRowCount === 0}>
+                    {isBulkSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Ekleniyor...
+                      </>
+                    ) : (
+                      filledBulkRowCount > 0
+                        ? `${filledBulkRowCount} Kullanıcı Ekle`
+                        : 'Satırları Doldurun'
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 

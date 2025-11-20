@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Clock, User, Building2, Calendar as CalendarIcon, FileText, Loader2, Users, UserCheck, Filter, X, ChevronLeft, ChevronRight, Search, TestTube, Maximize2, Minimize2, LayoutGrid, LayoutList, CalendarDays, Download, Printer, CheckCircle2, XCircle, AlertCircle, TrendingUp, Activity, RefreshCw, FileSpreadsheet, Edit } from 'lucide-react';
+import { Plus, Clock, User, Building2, Calendar as CalendarIcon, FileText, Loader2, Users, UserCheck, Filter, X, ChevronLeft, ChevronRight, Search, TestTube, Maximize2, Minimize2, LayoutGrid, LayoutList, CalendarDays, Download, Printer, CheckCircle2, XCircle, AlertCircle, TrendingUp, Activity, RefreshCw, FileSpreadsheet, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { tr } from 'date-fns/locale';
@@ -39,7 +39,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Checkbox } from '@/components/ui/checkbox';
+import type { CheckedState } from '@radix-ui/react-checkbox';
 import { useKeyboardShortcut } from '@/hooks/use-keyboard-shortcut';
 import * as XLSX from 'xlsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -110,6 +121,9 @@ export default function ScreeningsPage() {
   const [selectedScreenings, setSelectedScreenings] = useState<Set<number>>(new Set());
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<Screening['status'] | null>(null);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [isBulkStatusUpdating, setIsBulkStatusUpdating] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   
   // Filter states
   const [filterCompany, setFilterCompany] = useState<string>('all');
@@ -288,10 +302,11 @@ export default function ScreeningsPage() {
     if (!bulkStatus || selectedScreenings.size === 0) return;
 
     try {
+      setIsBulkStatusUpdating(true);
       await Promise.all(
         Array.from(selectedScreenings).map(id =>
           fetch(`/api/screenings/${id}`, {
-            method: 'PUT',
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: bulkStatus }),
           })
@@ -306,6 +321,47 @@ export default function ScreeningsPage() {
     } catch (error) {
       console.error('Error bulk updating:', error);
       toast.error('Toplu güncelleme sırasında hata oluştu');
+    } finally {
+      setIsBulkStatusUpdating(false);
+    }
+  };
+
+  const openBulkDelete = () => {
+    if (selectedScreenings.size === 0) {
+      toast.error('Lütfen silinecek randevuları seçin');
+      return;
+    }
+    setBulkDeleteDialogOpen(true);
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedScreenings.size === 0) return;
+
+    try {
+      setIsBulkDeleting(true);
+      const results = await Promise.allSettled(
+        Array.from(selectedScreenings).map((id) =>
+          fetch(`/api/screenings/${id}`, { method: 'DELETE' })
+        )
+      );
+
+      const successCount = results.filter((r) => r.status === 'fulfilled').length;
+      const failCount = results.length - successCount;
+
+      if (successCount > 0) {
+        toast.success(`${successCount} randevu silindi${failCount ? `, ${failCount} randevu silinemedi` : ''}`);
+      } else {
+        toast.error('Randevular silinirken hata oluştu');
+      }
+
+      setSelectedScreenings(new Set());
+      setBulkDeleteDialogOpen(false);
+      await fetchData();
+    } catch (error) {
+      console.error('Error bulk deleting screenings:', error);
+      toast.error('Toplu silme sırasında hata oluştu');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -446,6 +502,64 @@ export default function ScreeningsPage() {
     dateRange.end !== ''
   , [filterCompany, filterStatus, filterType, searchQuery, dateRange]);
 
+  const quickStatusFilters = useMemo(() => ([
+    { label: 'Planlananlar', value: 'scheduled', icon: Clock },
+    { label: 'Tamamlananlar', value: 'completed', icon: CheckCircle2 },
+    { label: 'Gelmedi', value: 'no-show', icon: AlertCircle },
+  ]), []);
+
+  const activeFilterBadges = useMemo(() => {
+    const badges: { key: string; label: string; value: string; onClear: () => void }[] = [];
+
+    if (filterStatus !== 'all') {
+      badges.push({
+        key: 'status',
+        label: 'Durum',
+        value: getStatusBadge(filterStatus as Screening['status']).label,
+        onClear: () => setFilterStatus('all')
+      });
+    }
+
+    if (filterType !== 'all') {
+      badges.push({
+        key: 'type',
+        label: 'Tarama Tipi',
+        value: getTypeBadge(filterType as Screening['type']),
+        onClear: () => setFilterType('all')
+      });
+    }
+
+    if (filterCompany !== 'all') {
+      const companyName = companies.find((c) => c.id === Number(filterCompany))?.name || 'Firma';
+      badges.push({
+        key: 'company',
+        label: 'Firma',
+        value: companyName,
+        onClear: () => setFilterCompany('all')
+      });
+    }
+
+    if (dateRange.start || dateRange.end) {
+      badges.push({
+        key: 'dateRange',
+        label: 'Tarih',
+        value: `${dateRange.start || 'Başlangıç'} - ${dateRange.end || 'Bitiş'}`,
+        onClear: () => setDateRange({ start: '', end: '' })
+      });
+    }
+
+    if (searchQuery) {
+      badges.push({
+        key: 'search',
+        label: 'Arama',
+        value: searchQuery,
+        onClear: () => setSearchQuery('')
+      });
+    }
+
+    return badges;
+  }, [filterStatus, filterType, filterCompany, companies, dateRange, searchQuery, getStatusBadge, getTypeBadge]);
+
   const selectedDateScreenings = useMemo(() => {
     if (!selectedDate) return [];
     return filteredScreenings.filter((s) => {
@@ -574,7 +688,7 @@ export default function ScreeningsPage() {
 
     try {
       const response = await fetch(`/api/screenings/${selectedScreeningForStatus.id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -602,6 +716,24 @@ export default function ScreeningsPage() {
     window.print();
   }, []);
 
+  const isListMode = viewMode === 'list';
+
+  const bulkCheckboxState = useMemo<CheckedState>(() => {
+    if (!isListMode || filteredScreenings.length === 0) return false;
+    if (selectedScreenings.size === 0) return false;
+    if (selectedScreenings.size === filteredScreenings.length) return true;
+    return 'indeterminate';
+  }, [filteredScreenings.length, isListMode, selectedScreenings]);
+
+  const handleBulkCheckboxChange = (checked: CheckedState) => {
+    if (!isListMode) return;
+    if (checked) {
+      setSelectedScreenings(new Set(filteredScreenings.map((s) => s.id)));
+    } else {
+      setSelectedScreenings(new Set());
+    }
+  };
+
   const ScreeningCard = useCallback(({ screening, showQuickActions = false, showCheckbox = false }: { screening: Screening; showQuickActions?: boolean; showCheckbox?: boolean }) => {
     const company = getCompanyById(screening.companyId);
     const statusBadge = getStatusBadge(screening.status);
@@ -615,7 +747,13 @@ export default function ScreeningsPage() {
           selectedScreenings.has(screening.id) ? 'bg-muted/50' : ''
         } ${hasConflicts ? 'border-orange-500' : ''}`}
         style={{ borderLeftColor: hasConflicts ? undefined : statusBadge.color.replace('bg-', '').replace('500', '') }}
-        onClick={() => !showCheckbox && handleScreeningClick(screening.id)}
+        onClick={() => {
+          if (showCheckbox) {
+            toggleSelection(screening.id);
+          } else {
+            handleScreeningClick(screening.id);
+          }
+        }}
       >
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-4 mb-3">
@@ -631,6 +769,25 @@ export default function ScreeningsPage() {
                 <span className="text-xs text-muted-foreground">Saat</span>
                 <span className="text-sm font-semibold">{screening.timeStart}</span>
               </div>
+
+          <div className="flex flex-wrap gap-2 px-3 pb-3">
+            {quickStatusFilters.map((filter) => {
+              const Icon = filter.icon;
+              const isActive = filterStatus === filter.value;
+              return (
+                <Button
+                  key={filter.value}
+                  variant={isActive ? 'default' : 'outline'}
+                  size="sm"
+                  className={`gap-2 text-xs md:text-sm ${isActive ? 'shadow-md' : ''}`}
+                  onClick={() => setFilterStatus(isActive ? 'all' : filter.value)}
+                >
+                  <Icon className="w-3 h-3" />
+                  {filter.label}
+                </Button>
+              );
+            })}
+          </div>
               <div className="flex-1 min-w-0">
                 <h4 className="font-semibold truncate">{company?.name}</h4>
                 <p className="text-sm text-muted-foreground truncate">{screening.participantName}</p>
@@ -865,6 +1022,23 @@ export default function ScreeningsPage() {
 
   const renderListView = () => (
     <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={bulkCheckboxState}
+            onCheckedChange={handleBulkCheckboxChange}
+            id="select-all-screenings"
+          />
+          <Label htmlFor="select-all-screenings" className="text-sm text-muted-foreground">
+            Tümünü seç
+          </Label>
+        </div>
+        {selectedScreenings.size > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => setSelectedScreenings(new Set())}>
+            Seçimi temizle
+          </Button>
+        )}
+      </div>
       {Object.entries(
         filteredScreenings.reduce((acc, screening) => {
           const date = new Date(screening.date).toDateString();
@@ -908,7 +1082,7 @@ export default function ScreeningsPage() {
                 {dayScreenings
                   .sort((a, b) => a.timeStart.localeCompare(b.timeStart))
                   .map((screening) => (
-                    <ScreeningCard key={screening.id} screening={screening} showQuickActions />
+                    <ScreeningCard key={screening.id} screening={screening} showQuickActions showCheckbox />
                   ))}
               </div>
             </div>
@@ -921,40 +1095,57 @@ export default function ScreeningsPage() {
     <div className={`flex flex-1 flex-col gap-4 md:gap-6 p-3 md:p-4 lg:p-6 bg-linear-to-b from-background via-background to-muted/40 ${isFullscreen ? 'fixed inset-0 z-50 bg-background overflow-auto' : ''}`}>
       {/* Header */}
       <div className="flex flex-col gap-3 md:gap-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground/90">Randevu Takvimi</h1>
-            <p className="text-sm md:text-base text-muted-foreground mt-1">
-              Sağlık taramalarını görüntüleyin ve yönetin
+            <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Sağlık Taramaları</p>
+            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground">Randevu Kontrol Merkezi</h1>
+            <p className="text-sm text-muted-foreground">
+              Randevuları filtreleyin, aksiyon alın ve hızlıca yönetin.
             </p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            {/* NEW: Bulk action buttons */}
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             {selectedScreenings.size > 0 && (
               <>
-                <Badge variant="secondary" className="gap-1">
+                <Badge variant="secondary" className="gap-1 px-3 py-1">
                   {selectedScreenings.size} seçili
                 </Badge>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setBulkStatusDialogOpen(true)}
-                  className="h-9 border-border/70 hover:border-primary/60 hover:bg-primary/5"
-                >
-                  <Activity className="w-4 h-4 mr-2" />
-                  Toplu Durum
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedScreenings(new Set())}
-                  className="h-9"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBulkStatusDialogOpen(true)}
+                    disabled={isBulkStatusUpdating}
+                  >
+                    {isBulkStatusUpdating ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Activity className="w-4 h-4 mr-2" />
+                    )}
+                    {isBulkStatusUpdating ? 'Güncelleniyor' : 'Toplu Durum'}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={openBulkDelete}
+                    disabled={isBulkDeleting}
+                  >
+                    {isBulkDeleting ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 mr-2" />
+                    )}
+                    {isBulkDeleting ? 'Siliniyor' : 'Toplu Sil'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedScreenings(new Set())}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
               </>
             )}
-            
             <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing} size="sm" className="h-9 w-9 border-border/70">
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             </Button>
@@ -987,12 +1178,28 @@ export default function ScreeningsPage() {
             <Link href="/screenings/new" className="flex-1 sm:flex-initial">
               <Button size="sm" className="w-full md:size-default gap-1 md:gap-2">
                 <Plus className="w-3 h-3 md:w-4 md:h-4" />
-                <span className="hidden sm:inline">Yeni Randevu</span>
-                <span className="sm:hidden">Ekle</span>
+                Yeni Randevu
               </Button>
             </Link>
           </div>
         </div>
+
+        {hasActiveFilters && activeFilterBadges.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {activeFilterBadges.map((badge) => (
+              <Badge key={badge.key} variant="secondary" className="flex items-center gap-2 pr-2">
+                <span className="text-xs uppercase text-muted-foreground">{badge.label}</span>
+                <span className="font-semibold text-foreground">{badge.value}</span>
+                <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={badge.onClear}>
+                  <X className="w-3 h-3" />
+                </Button>
+              </Badge>
+            ))}
+            <Button variant="ghost" size="sm" className="text-xs" onClick={clearFilters}>
+              Tüm filtreleri temizle
+            </Button>
+          </div>
+        )}
 
         {/* Stats Overview */}
         <div className="grid gap-3 md:gap-4 grid-cols-2 lg:grid-cols-4">
@@ -1502,7 +1709,7 @@ export default function ScreeningsPage() {
                 {viewMode === 'month' && (
                   <div className="space-y-2 md:space-y-3">
                     {currentViewScreenings.map((screening) => (
-                      <ScreeningCard key={screening.id} screening={screening} showQuickActions />
+                      <ScreeningCard key={screening.id} screening={screening} showQuickActions showCheckbox={isListMode} />
                     ))}
                   </div>
                 )}
@@ -1544,12 +1751,17 @@ export default function ScreeningsPage() {
       </Dialog>
 
       {/* NEW: Bulk Status Dialog */}
-      <Dialog open={bulkStatusDialogOpen} onOpenChange={setBulkStatusDialogOpen}>
+      <Dialog open={bulkStatusDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setBulkStatus(null);
+        }
+        setBulkStatusDialogOpen(open);
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Toplu Durum Değişikliği</DialogTitle>
             <DialogDescription>
-              {selectedScreenings.size} randevunun durumunu değiştirmek istediğinize emin misiniz?
+              Seçili {selectedScreenings.size} randevunun durumunu güncelleyin.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -1572,12 +1784,31 @@ export default function ScreeningsPage() {
             <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>
               İptal
             </Button>
-            <Button onClick={handleBulkStatusUpdate} disabled={!bulkStatus}>
+            <Button onClick={handleBulkStatusUpdate} disabled={!bulkStatus || isBulkStatusUpdating}>
+              {isBulkStatusUpdating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Güncelle
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Toplu silme işlemini onayla</AlertDialogTitle>
+            <AlertDialogDescription>
+              Seçili {selectedScreenings.size} randevuyu silmek üzeresiniz. Bu işlem geri alınamaz.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBulkDeleting}>İptal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDeleteConfirm} disabled={isBulkDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {isBulkDeleting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Evet, Sil
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Quick Edit Dialog */}
       <Dialog open={quickEditDialogOpen} onOpenChange={setQuickEditDialogOpen}>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { documents, screenings } from '@/db/schema';
 import { eq, desc } from 'drizzle-orm';
-import formidable from 'formidable';
+import formidable, { Fields, Files, File } from 'formidable';
 import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
@@ -44,7 +44,7 @@ async function convertRequestToReadable(request: NextRequest): Promise<Readable>
 }
 
 // Helper function to parse multipart form data
-async function parseForm(request: NextRequest): Promise<{ fields: formidable.Fields; files: formidable.Files }> {
+async function parseForm(request: NextRequest): Promise<{ fields: Fields; files: Files }> {
   return new Promise(async (resolve, reject) => {
     const form = formidable({
       maxFileSize: MAX_FILE_SIZE,
@@ -100,7 +100,7 @@ export async function GET(
       .select()
       .from(documents)
       .where(eq(documents.screeningId, parseInt(screeningId)))
-      .orderBy(desc(documents.uploadedAt));
+      .orderBy(desc(documents.uploadDate));
 
     return NextResponse.json(screeningDocuments, { status: 200 });
   } catch (error) {
@@ -236,16 +236,24 @@ export async function POST(
     const notes = notesArray ? (Array.isArray(notesArray) ? notesArray[0] : notesArray) : null;
 
     // Insert document into database
+    const now = new Date().toISOString();
     const newDocument = await db
       .insert(documents)
       .values({
         screeningId: parseInt(screeningId),
+        companyId: screening[0].companyId,
+        title: originalFilename,
+        description: notes || null,
         fileName: originalFilename,
-        fileUrl: fileUrl,
+        fileUrl,
         fileSize: file.size,
         fileType: file.mimetype || '',
-        uploadedAt: new Date().toISOString(),
-        notes: notes || null,
+        category: 'screening',
+        uploadDate: now,
+        uploadedBy: 'system',
+        status: 'active',
+        createdAt: now,
+        updatedAt: now,
       })
       .returning();
 

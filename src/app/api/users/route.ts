@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
     const roleFilter = searchParams.get('role');
     const isActiveFilter = searchParams.get('isActive');
 
-    let query = db.select({
+    const baseQuery = db.select({
       id: users.id,
       fullName: users.fullName,
       email: users.email,
@@ -86,9 +86,7 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(users.isActive, isActiveValue));
     }
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
+    const query = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
 
     const results = await query
       .orderBy(desc(users.createdAt))
@@ -96,7 +94,7 @@ export async function GET(request: NextRequest) {
       .offset(offset);
 
     return NextResponse.json(results);
-  } catch (error) {
+  } catch (error: any) {
     console.error('GET error:', error);
     return NextResponse.json({ 
       error: 'Internal server error: ' + error.message 
@@ -203,7 +201,7 @@ export async function POST(request: NextRequest) {
       });
 
     return NextResponse.json(newUser[0], { status: 201 });
-  } catch (error) {
+  } catch (error: any) {
     console.error('POST error:', error);
     return NextResponse.json({ 
       error: 'Internal server error: ' + error.message 
@@ -358,7 +356,7 @@ export async function PUT(request: NextRequest) {
       });
 
     return NextResponse.json(updated[0]);
-  } catch (error) {
+  } catch (error: any) {
     console.error('PUT error:', error);
     return NextResponse.json({ 
       error: 'Internal server error: ' + error.message 
@@ -416,10 +414,11 @@ export async function DELETE(request: NextRequest) {
       message: 'User successfully deactivated',
       user: deleted[0]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('DELETE error:', error);
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ 
-      error: 'Internal server error: ' + error.message 
+      error: 'Internal server error: ' + message 
     }, { status: 500 });
   }
 }

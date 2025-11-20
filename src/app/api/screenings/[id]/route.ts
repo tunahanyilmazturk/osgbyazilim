@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { screenings, screeningUsers, users, companies, screeningTests, healthTests } from '@/db/schema';
+import { screenings, screeningUsers, users, companies, screeningTests, healthTests, companyWorkers } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
 const VALID_TYPES = ['periodic', 'initial', 'special'];
@@ -9,10 +9,10 @@ const VALID_STATUSES = ['scheduled', 'completed', 'cancelled', 'no-show'];
 // GET single screening by ID
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
 
     if (!id || isNaN(parseInt(id))) {
       return NextResponse.json(
@@ -67,6 +67,20 @@ export async function GET(
       .innerJoin(healthTests, eq(screeningTests.testId, healthTests.id))
       .where(eq(screeningTests.screeningId, parseInt(id)));
 
+    // Fetch company workers (personnel) for this screening's company
+    const companyPersonnel = await db
+      .select({
+        id: companyWorkers.id,
+        fullName: companyWorkers.fullName,
+        email: companyWorkers.email,
+        phone: companyWorkers.phone,
+        jobTitle: companyWorkers.jobTitle,
+        department: companyWorkers.department,
+        isActive: companyWorkers.isActive,
+      })
+      .from(companyWorkers)
+      .where(eq(companyWorkers.companyId, screening[0].companyId));
+
     return NextResponse.json(
       {
         ...screening[0],
@@ -82,6 +96,7 @@ export async function GET(
           name: at.name,
           code: at.code,
         })),
+        companyWorkers: companyPersonnel,
       },
       { status: 200 }
     );
@@ -97,10 +112,10 @@ export async function GET(
 // PATCH - Update screening (partial update)
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
 
     if (!id || isNaN(parseInt(id))) {
       return NextResponse.json(
@@ -245,10 +260,10 @@ export async function PATCH(
 // DELETE screening
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
 
     if (!id || isNaN(parseInt(id))) {
       return NextResponse.json(
